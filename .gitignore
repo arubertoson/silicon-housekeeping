@@ -2,6 +2,7 @@
 node_modules/
 
 # Local Pi runtime/state
+.pi/
 agent/auth.json
 agent/trust.json
 agent/pi-debug.log
