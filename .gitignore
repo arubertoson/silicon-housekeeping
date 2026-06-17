@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+
+# Local Pi runtime/state
+agent/auth.json
+agent/trust.json
+agent/pi-debug.log
+agent/pi-permissions.jsonc
+agent/sessions/
+agent/npm/
+agent/extensions/
+
+# Local test/runtime state
+.pi/
+pi-test/
+out
+
+# Build/cache output
+coverage/
+dist/
+*.tsbuildinfo
