@@ -1,0 +1,36 @@
+{
+  "lastChangelogVersion": "0.87.1",
+  "defaultProvider": "openai-codex",
+  "defaultModel": "gpt-5.6-sol",
+  "defaultThinkingLevel": "medium",
+  "hideThinkingBlock": false,
+  "extensions": [
+    "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/prompt-editor.ts",
+    "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/whimsical.ts",
+    "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/answer.ts",
+    "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/goal.ts"
+  ],
+  "packages": [
+    "npm:@offbynan/pi-cursor-provider",
+    "npm:@ff-labs/pi-fff",
+    "npm:pi-slopchop",
+    "git:github.com/elrond298/pi-worktree",
+    "git:github.com/Mathuv/pi-symbol-autocomplete@2b91b1991fecfc8dc2e2667dd74fb9a0101c2423",
+    "npm:@se1zer/pi-copy@1.0.0"
+  ],
+  "editorPaddingX": 3,
+  "enableInstallTelemetry": false,
+  "doubleEscapeAction": "none",
+  "treeFilterMode": "default",
+  "theme": "dark",
+  "compaction": {
+    "enabled": false
+  },
+  "tuiMode": "fullscreen",
+  "fullscreenScrollbar": "auto",
+  "enabledModels": [
+    "openai-codex/gpt-6-luna",
+    "openai-codex/gpt-6-sol",
+    "openai-codex/gpt-6-astra"
+  ]
+}

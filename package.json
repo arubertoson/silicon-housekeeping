@@ -4,30 +4,20 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "check": "tsc --noEmit",
     "test": "vitest run"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "devEngines": {
-    "packageManager": {
-      "name": "pnpm",
-      "version": "^11.5.2",
-      "onFail": "download"
-    }
-  },
+  "packageManager": "npm@11.19.0",
   "type": "module",
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  },
   "devDependencies": {
-    "@earendil-works/pi-agent-core": "file:/home/macke/.local/share/pi-local-release/tarballs/earendil-works-pi-agent-core-0.79.3.tgz",
-    "@earendil-works/pi-ai": "file:/home/macke/.local/share/pi-local-release/tarballs/earendil-works-pi-ai-0.79.3.tgz",
-    "@earendil-works/pi-coding-agent": "file:/home/macke/.local/share/pi-local-release/tarballs/earendil-works-pi-coding-agent-0.79.3.tgz",
-    "@earendil-works/pi-tui": "file:/home/macke/.local/share/pi-local-release/tarballs/earendil-works-pi-tui-0.79.3.tgz",
     "@types/node": "^25.9.1",
-    "prettier": "^3.8.3",
-    "tsx": "^4.22.4",
-    "typescript": "^6.0.3",
-    "typescript-language-server": "^5.3.0",
     "vitest": "^4.1.8"
   }
 }

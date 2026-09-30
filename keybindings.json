@@ -1,0 +1,18 @@
+{
+  "tui.input.newLine": ["ctrl+j"],
+
+  "tui.editor.pageUp": ["ctrl+u"],
+  "tui.editor.pageDown": ["ctrl+d"],
+
+  "tui.editor.deleteToLineStart": [],
+  "tui.editor.deleteCharForward": ["delete"],
+
+  "app.session.tree": ["ctrl+l"],
+  "app.model.select": ["alt+m"],
+
+  "app.exit": [],
+
+  "tui.altScreen.pageUp": ["pageUp", "ctrl+u"],
+  "tui.altScreen.pageDown": ["pageDown", "ctrl+d"],
+  "tui.altScreen.bottom": ["end", "alt+g"]
+}

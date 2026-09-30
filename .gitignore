@@ -3,16 +3,14 @@ node_modules/
 
 # Local Pi runtime/state
 .pi/
-agent/auth.json
-agent/trust.json
-agent/pi-debug.log
-agent/pi-permissions.jsonc
-agent/sessions/
-agent/npm/
-agent/extensions/
+auth.json
+trust.json
+pi-debug.log
+pi-permissions.jsonc
+sessions/
+npm/
 
 # Local test/runtime state
-.pi/
 pi-test/
 out
 
@@ -20,3 +18,7 @@ out
 coverage/
 dist/
 *.tsbuildinfo
+
+# Intentionally curated project-local Pi resources are part of this repo.
+!projects/pi-mono/.pi/
+!projects/pi-mono/.pi/**
