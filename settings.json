@@ -8,6 +8,7 @@
   "extensions": [
     "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/prompt-editor.ts",
     "/home/macke/dev/home/github.com/arubertoson/silicon-housekeeping/extensions/zig-stdlib-search.ts",
+    "/home/macke/dev/home/github.com/arubertoson/silicon-housekeeping/extensions/debug-toolcalls.ts",
     "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/whimsical.ts",
     "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/answer.ts",
     "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/goal.ts"
