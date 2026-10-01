@@ -1,14 +1,18 @@
 ---
-description: Implement from the caller inward, making the emerging design easy to review
+description: Confirm the outcome, then implement from the caller inward
 argument-hint: "[task-id]"
 ---
-Implement the agreed work from this conversation. Optional Beads task: $ARGUMENTS
+Prepare to implement the work discussed in this conversation. Optional Beads task: $ARGUMENTS
+
+Before implementation, inspect the conversation and, as needed, relevant repository instructions, code, working-copy state, and task context. Then give me a short outcome brief: the result we believe we're aiming for, the first useful increment, and any important assumptions or unresolved ambiguity. Ask me to confirm or correct it, and stop. Do not edit files, run implementation checks, or begin implementation until I confirm. If the outcome is already explicit, still provide the brief and wait for confirmation.
+
+After confirmation, implement the confirmed work as follows:
 
 Follow `application-design`, relevant language skills, and repository instructions. Read the relevant code and working-copy state; preserve unrelated work. If a task ID is supplied, read the task and necessary parent context, but do not claim or update it. A task is not required. Use the conversation for the current increment; do not create progress documents or duplicate task notes.
 
 ${VCS_LOG}
 
-Keep the agreed outcome in view: what result should the caller receive or make observable? Work from that caller inward. Let its usage establish the inputs and results of supporting operations. Introduce code because the caller demonstrates a need, not because a layer or abstraction might be useful later. Trust settled requirements, inspect repository-answerable questions, and make reasonable implementation decisions without asking me to design every detail.
+Keep the confirmed outcome in view: what result should the caller receive or make observable? Work from that caller inward. Let its usage establish the inputs and results of supporting operations. Introduce code because the caller demonstrates a need, not because a layer or abstraction might be useful later. Trust settled requirements, inspect repository-answerable questions, and make reasonable implementation decisions without asking me to design every detail.
 
 Choose the next increment for useful design feedback. Make enough concrete code visible to evaluate what calls what, in which order, how data flows, where responsibilities belong, and how naturally it reads. Do not fill in several layers before exposing the calling code. A complete end-to-end path is not required for every increment; neither is an arbitrary file count or a helper-sized change. Mark unfinished operations honestly, keep them out of active paths where necessary, and never make placeholders appear to work. Avoid unrelated refactoring.
 
