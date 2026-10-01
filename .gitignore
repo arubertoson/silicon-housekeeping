@@ -22,3 +22,8 @@ dist/
 # Intentionally curated project-local Pi resources are part of this repo.
 !projects/pi-mono/.pi/
 !projects/pi-mono/.pi/**
+
+# Local runtime state and external checkouts
+git/
+tmux-subagents/
+models-store.json
