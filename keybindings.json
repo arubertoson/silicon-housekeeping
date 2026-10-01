@@ -8,6 +8,7 @@
   "tui.editor.deleteCharForward": ["delete"],
 
   "app.session.tree": ["ctrl+l"],
+  "app.session.delete": ["delete"],
   "app.model.select": ["alt+m"],
   "app.model.cycleForward": [],
 
