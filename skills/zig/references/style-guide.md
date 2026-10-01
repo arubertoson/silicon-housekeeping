@@ -73,12 +73,19 @@ Keep the steps of one operation close enough to reason about together.
 * Extract helpers for meaningful concepts, shared behavior, resource boundaries,
   or ownership that becomes easier to understand independently.
 * Avoid forwarding helpers and layers that only rename calls or hide sequencing.
+* Avoid fragmenting one operation across many tiny helpers or wrapper types.
+  Small units are useful when they name a real concept, clarify a contract, or
+  establish an ownership/resource boundary; otherwise keep the data and flow
+  local. Do not add one-off types merely to wrap a few fields or make a function
+  shorter.
 * Keep validation, side effects, commit points, and compensating actions visibly
   related. Do not scatter a transaction's failure policy across incidental helpers.
 * Prefer concrete parameter types when there is one supported implementation.
   Use `anytype` for genuine generic behavior, not to avoid naming a dependency.
-* Introduce request, result, and state structs when they describe real concepts,
-  not just to reduce parameter counts.
+* Introduce request, result, and state structs when they describe real concepts
+  or clarify ownership, not just to reduce parameter counts. A small type is not
+  inherently a problem, but a proliferation of incidental objects obscures the
+  model and makes behavior harder to follow.
 
 ## Handle Errors According to Policy
 
