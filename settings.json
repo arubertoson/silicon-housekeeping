@@ -1,11 +1,13 @@
 {
   "lastChangelogVersion": "0.87.1",
   "defaultProvider": "openai-codex",
+  "defaultTools": ["+zig-stdlib-search"],
   "defaultModel": "gpt-5.6-sol",
   "defaultThinkingLevel": "medium",
   "hideThinkingBlock": false,
   "extensions": [
     "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/prompt-editor.ts",
+    "/home/macke/dev/home/github.com/arubertoson/silicon-housekeeping/extensions/zig-stdlib-search.ts",
     "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/whimsical.ts",
     "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/answer.ts",
     "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/goal.ts"
