@@ -27,3 +27,4 @@ dist/
 git/
 tmux-subagents/
 models-store.json
+modes.json

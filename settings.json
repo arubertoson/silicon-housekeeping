@@ -1,31 +1,40 @@
 {
-  "lastChangelogVersion": "0.87.1",
+  "lastChangelogVersion": "0.99.1",
   "defaultProvider": "openai-codex",
   "defaultTools": ["+zig-stdlib-search"],
-  "defaultModel": "gpt-5.6-sol",
-  "defaultThinkingLevel": "medium",
   "hideThinkingBlock": false,
   "extensions": [
-    "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/prompt-editor.ts",
+    "/home/macke/dev/home/github.com/arubertoson/silicon-housekeeping/extensions/prompt-editor.ts",
     "/home/macke/dev/home/github.com/arubertoson/silicon-housekeeping/extensions/zig-stdlib-search.ts",
     "/home/macke/dev/home/github.com/arubertoson/silicon-housekeeping/extensions/debug-toolcalls.ts",
     "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/whimsical.ts",
     "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/answer.ts",
-    "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/goal.ts"
+    "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/goal.ts",
+    "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/btw.ts",
+    "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/continue.ts",
+    "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/control.ts",
+    "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/files.ts",
+    "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/unified-edit.ts",
+    "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/no-sleep.ts",
+    "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/notify.ts",
+    "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/review.ts",
+    "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/session-breakdown.ts",
+    "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/split-fork.ts",
+    "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/subagent.ts",
+    "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/todos.ts",
+    "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/trust-github-repos.ts",
+    "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/uv.ts"
   ],
   "packages": [
-    "npm:@offbynan/pi-cursor-provider",
     "npm:@ff-labs/pi-fff",
-    "npm:pi-slopchop",
-    "git:github.com/elrond298/pi-worktree",
     "git:github.com/Mathuv/pi-symbol-autocomplete@2b91b1991fecfc8dc2e2667dd74fb9a0101c2423",
-    "npm:@se1zer/pi-copy@1.0.0"
+    "npm:@se1zer/pi-copy@1.0.0",
+    "npm:pi-slopchop"
   ],
   "editorPaddingX": 3,
   "enableInstallTelemetry": false,
   "doubleEscapeAction": "none",
   "treeFilterMode": "default",
-  "theme": "dark",
   "compaction": {
     "enabled": false
   },
@@ -33,7 +42,10 @@
   "fullscreenScrollbar": "auto",
   "enabledModels": [
     "openai-codex/gpt-6-luna",
-    "openai-codex/gpt-6-sol",
-    "openai-codex/gpt-6-astra"
-  ]
+    "openai-codex/gpt-6.1-sol"
+  ],
+  "showCacheMissNotices": true,
+  "collapseChangelog": true,
+  "fullscreenExitOutput": "resume-hint",
+  "defaultThinkingLevel": "high"
 }

@@ -9,6 +9,7 @@
 
   "app.session.tree": ["ctrl+l"],
   "app.model.select": ["alt+m"],
+  "app.model.cycleForward": [],
 
   "app.exit": [],
 
