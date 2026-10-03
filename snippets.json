@@ -1,0 +1,3 @@
+{
+  "careful": "Check edge ${1} cases and avoid ${2:test} unrelated changes."
+}

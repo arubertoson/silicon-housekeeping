@@ -39,6 +39,49 @@ For local Pi development, `just link-agent` links this repository directly to
 live-session switch is intentional.** Set `PI_AGENT_DIR` to override the
 destination.
 
+## Editor snippets
+
+`extensions/snippets.ts` expands `;name` references in the editor using Pi's
+autocomplete hook. It preserves the existing editor component, including
+`prompt-editor`, and only takes over navigation while a snippet session is active.
+
+Edit `~/.pi/agent/snippets.json` (included here as an empty object):
+
+```json
+{
+  "careful": "Check edge cases and avoid unrelated changes.",
+  "tests": "Add regression tests for the behavior being changed.",
+  "steps": "First, explain the plan.\nThen implement it.",
+  "function": "function ${1:name}(${2}) {\n  ${3}\n}"
+}
+```
+
+Run `/reload` after editing. The path follows `PI_CODING_AGENT_DIR` when set.
+Names are case-sensitive and use letters, digits, underscores, or hyphens;
+omit the leading `;` in JSON keys. Definitions are global, not project-local.
+Missing configuration means no snippets; invalid JSON or definitions produce
+a warning and disable snippets until corrected and reloaded.
+
+Type `;` at the start of a line or after whitespace to see snippets, or type
+`;prefix` to filter names. Use arrow keys to choose, then **Tab** to insert.
+An exact name expands on Tab even without an open completion menu. Unknown
+names remain unchanged. Native autocomplete also accepts **Enter** when its
+menu is open; this inserts the snippet without submitting the message.
+
+Only the reference before the cursor is replaced and surrounding text is
+preserved. With no fields, the cursor lands after the expansion; normal editor
+undo restores the reference. Multiline strings use JSON `\n` escapes.
+
+Use `${1:default}` for a field with default text and `${2}` for an empty field.
+Field numbers must be unique positive safe integers and determine navigation
+order; defaults are replaced when you start typing. While a snippet is active, **Tab** advances,
+**Shift+Tab** goes back, and **Escape** or Tab at the last field finishes at the
+end of the expansion. Other autocomplete behavior resumes after finishing.
+Edits are tracked only within the active field. Undo, submission, edits outside
+that field or across markers, and external text replacement end navigation
+without reverting the user's edits. Text outside fields is literal; fields are
+single-use, with no linked values, recursive expansion, or transformations.
+
 ## Development
 
 Run `npm test` for the test suite. The commit extension tests use temporary real
