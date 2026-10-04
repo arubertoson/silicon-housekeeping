@@ -5,9 +5,6 @@
     "+codemode",
     "+zig-stdlib-search"
   ],
-  "codemode": {
-    "mode": "on"
-  },
   "hideThinkingBlock": false,
   "extensions": [
     "/home/macke/dev/home/github.com/arubertoson/silicon-housekeeping/extensions/prompt-editor.ts",
@@ -41,7 +38,7 @@
   "doubleEscapeAction": "none",
   "treeFilterMode": "default",
   "compaction": {
-    "enabled": false
+    "enabled": true
   },
   "tuiMode": "fullscreen",
   "fullscreenScrollbar": "auto",
@@ -52,5 +49,6 @@
   "showCacheMissNotices": true,
   "collapseChangelog": true,
   "fullscreenExitOutput": "resume-hint",
-  "defaultThinkingLevel": "high"
+  "defaultThinkingLevel": "high",
+  "theme": "dark"
 }
