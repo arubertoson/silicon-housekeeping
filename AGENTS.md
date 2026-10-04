@@ -25,3 +25,4 @@ Preserve provenance and project scope when organizing assets. Do not silently tu
 - Answer questions before starting implementation.
 - When responding to feedback or an analysis, explicitly say whether you agree or disagree.
 - Follow each repository's `AGENTS.md` and documented commands.
+- don't write to `README.md`, `CHANGELOG.md` or other doc files without specific instructions.
