@@ -1,7 +1,13 @@
 {
-  "lastChangelogVersion": "0.99.1",
+  "lastChangelogVersion": "1.0.1",
   "defaultProvider": "openai-codex",
-  "defaultTools": ["+zig-stdlib-search"],
+  "defaultTools": [
+    "+codemode",
+    "+zig-stdlib-search"
+  ],
+  "codemode": {
+    "mode": "on"
+  },
   "hideThinkingBlock": false,
   "extensions": [
     "/home/macke/dev/home/github.com/arubertoson/silicon-housekeeping/extensions/prompt-editor.ts",
