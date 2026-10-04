@@ -64,31 +64,26 @@ export default function commitExtension(pi: ExtensionAPI) {
 		| {
 				previousModel: NonNullable<ExtensionContext["model"]>;
 				previousThinking: ReturnType<typeof pi.getThinkingLevel>;
-				commitModel: NonNullable<ExtensionContext["model"]>;
 		  }
 		| undefined;
 
-	async function restoreModel(ctx: ExtensionContext) {
+	function restoreThinking(ctx: ExtensionContext) {
 		const saved = restore;
 		restore = undefined;
 		// Do not overwrite a model or thinking level deliberately changed during the run.
 		if (
 			!saved ||
-			ctx.model?.provider !== saved.commitModel.provider ||
-			ctx.model.id !== saved.commitModel.id ||
-			pi.getThinkingLevel() !== "low"
+			ctx.model?.provider !== saved.previousModel.provider ||
+			ctx.model.id !== saved.previousModel.id ||
+			pi.getThinkingLevel() !== "off"
 		)
 			return;
-		if (!(await pi.setModel(saved.previousModel))) {
-			ctx.ui.notify("Could not restore the previous model after /commit.", "error");
-			return;
-		}
 		pi.setThinkingLevel(saved.previousThinking);
-		ctx.ui.notify("Restored the previous model and thinking level after /commit.", "info");
+		ctx.ui.notify("Restored the previous thinking level after /commit.", "info");
 	}
 
-	pi.on("agent_settled", async (_event, ctx) => restoreModel(ctx));
-	pi.on("session_shutdown", async (_event, ctx) => restoreModel(ctx));
+	pi.on("agent_settled", (_event, ctx) => restoreThinking(ctx));
+	pi.on("session_shutdown", (_event, ctx) => restoreThinking(ctx));
 
 	pi.registerCommand("commit", {
 		description: "Create a local Git or jj change: /commit [issue] [files/instructions]",
@@ -100,24 +95,18 @@ export default function commitExtension(pi: ExtensionAPI) {
 			starting = true;
 			try {
 				const vcs = await detectVcs(pi, ctx.cwd);
-				const candidates = ctx.modelRegistry.getAvailable().filter((model) => model.id === "gpt-6-luna");
-				const model =
-					candidates.find((item) => item.provider === ctx.model?.provider) ??
-					(candidates.length === 1 ? candidates[0] : undefined);
-				if (!model) throw new Error("gpt-6-luna is unavailable or ambiguous; select its provider before /commit.");
 				const previousModel = ctx.model;
 				if (!previousModel) throw new Error("Select a model before /commit.");
 				const previousThinking = pi.getThinkingLevel();
 				// Repository validation can yield; never queue a commit behind newly started work.
 				if (!ctx.isIdle() || ctx.hasPendingMessages()) throw new Error("Wait for current work before /commit.");
-				if (!(await pi.setModel(model))) throw new Error("Cannot authenticate gpt-6-luna; commit not started.");
-				pi.setThinkingLevel("low");
-				restore = { previousModel, previousThinking, commitModel: model };
+				pi.setThinkingLevel("off");
+				restore = { previousModel, previousThinking };
 				if (!ctx.isIdle() || ctx.hasPendingMessages()) throw new Error("Wait for current work before /commit.");
-				ctx.ui.notify(`Commit VCS: ${vcs}; model: ${model.provider}/${model.id}, thinking low.`, "info");
+				ctx.ui.notify(`Commit VCS: ${vcs}; model: ${previousModel.provider}/${previousModel.id}, thinking off.`, "info");
 				pi.sendUserMessage(commitPrompt(vcs, args));
 			} catch (error) {
-				await restoreModel(ctx);
+				restoreThinking(ctx);
 				ctx.ui.notify(`Cannot start /commit: ${error instanceof Error ? error.message : String(error)}`, "error");
 			} finally {
 				starting = false;

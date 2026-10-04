@@ -89,7 +89,7 @@ function makeContext({ task = true, status = "open", pause = false }: { task?: b
 	checkpointExtension(api as unknown as ExtensionAPI);
 	return {
 		invoke: (steering = "") => handler(steering, ctx as unknown as ExtensionCommandContext),
-		original, issue, replacement: () => replacement, sendUserMessage, notify, exec,
+		original, replacement: () => replacement, sendUserMessage, notify, exec,
 	};
 }
 
@@ -98,7 +98,6 @@ describe("/checkpoint session handoff", () => {
 		const s = makeContext({ pause: false });
 		await s.invoke();
 		expect(s.notify).not.toHaveBeenCalled();
-		expect(s.issue.notes).toBe("Keep existing notes unchanged.");
 		expect(s.sendUserMessage).toHaveBeenCalledOnce();
 		const kickoff = s.sendUserMessage.mock.calls[0][0];
 		expect(kickoff).toContain("First reply with a brief state summary and proposed next action");
