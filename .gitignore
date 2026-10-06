@@ -3,6 +3,7 @@ node_modules/
 
 # Local Pi runtime/state
 .pi/
+crashes.json
 auth.json
 trust.json
 pi-debug.log
@@ -30,3 +31,4 @@ models-store.json
 modes.json
 
 .workspaces/
+
