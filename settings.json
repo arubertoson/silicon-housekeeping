@@ -40,6 +40,10 @@
   "compaction": {
     "enabled": true
   },
+  "checkpointCompaction": {
+    "triggerTokens": 100000,
+    "rebuiltContextTokens": 16000
+  },
   "tuiMode": "fullscreen",
   "fullscreenScrollbar": "auto",
   "enabledModels": [
