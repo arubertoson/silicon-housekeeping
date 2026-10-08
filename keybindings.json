@@ -15,6 +15,6 @@
   "app.exit": [],
 
   "tui.altScreen.halfPageUp": ["ctrl+u"],
-  "tui.altScreen.halfPageDown": [""ctrl+d"],
+  "tui.altScreen.halfPageDown": ["ctrl+d"],
   "tui.altScreen.bottom": ["end", "alt+g"]
 }
