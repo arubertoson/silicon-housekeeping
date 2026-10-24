@@ -14,7 +14,8 @@ export interface CompactionState {
     readonly trigger: "size" | "expiry" | "manual";
     readonly controller: AbortController;
     readonly requestId?: string;
-    phase: "extracting" | "ready" | "rejected";
+    readonly evidenceFingerprint?: string;
+    phase: "requested" | "extracting" | "ready" | "rejected";
     failureOutcome?: "failed" | "cancelled";
     errorMessage?: string;
   };

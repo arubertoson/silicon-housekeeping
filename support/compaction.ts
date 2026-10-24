@@ -13,28 +13,60 @@ import type {
 import type { CompactionState } from "./compaction-state.ts";
 import { compactionAttemptType, fingerprint, readObservation, type CompactionObservation } from "./compaction-observation.ts";
 import { checkpointSections, requestCheckpoint } from "./compaction-request.ts";
+import { resolveCompactionConfig, type CompactionConfig } from "./compaction-config.ts";
 
 export { scheduleCheck, suspend, invalidate, dispose, type CompactionState } from "./compaction-state.ts";
 export { observeRequest, observePayload, readObservation, reconstructRequest } from "./compaction-observation.ts";
 export { requestCheckpoint } from "./compaction-request.ts";
-
-// Manual extraction is implemented. Default activation and automatic policy wait
-// for their later phases; isolated integration profiles can exercise this path.
-export const compactionImplemented = false;
+export { resolveCompactionConfig, defaultCompactionConfig, sizeTargetTokens } from "./compaction-config.ts";
 
 type CompactionDecision =
   | { kind: "compact"; trigger: "size" | "expiry" }
   | { kind: "wait"; checkAt: number }
   | { kind: "skip"; reason: string };
 
-// Pure policy: soft size target, or known expiry with sufficiently large context.
-// Unknown TTL means no expiry deadline; suppress unchanged failed attempts.
-export function decideCompaction(_input: {
+// Pure idle policy. Expiry is a best-effort scheduling deadline, not a guarantee
+// of cache residency. Neither trigger predicts or recovers context overflow.
+export function decideCompaction(input: {
   observation: CompactionObservation;
   contextUsage: ContextUsage | undefined;
+  configuration: CompactionConfig;
   now: number;
 }): CompactionDecision {
-  throw new Error("Compaction policy is not implemented");
+  const { observation, contextUsage, configuration, now } = input;
+  if (!configuration.enabled) return { kind: "skip", reason: "auto-compaction-disabled" };
+  if (observation.eligibility.kind !== "candidate") {
+    return { kind: "skip", reason: observation.eligibility.reason };
+  }
+  if (!observation.requestId || !observation.evidenceFingerprint) {
+    return { kind: "skip", reason: "missing-size-evidence" };
+  }
+  const tokens = contextUsage?.tokens;
+  if (tokens === undefined || tokens === null || !Number.isFinite(tokens) || tokens < 0) {
+    return { kind: "skip", reason: "unknown-context-usage" };
+  }
+  if (observation.cache && (!Number.isFinite(now) || now >= observation.cache.expiresAt)) {
+    return { kind: "skip", reason: "cache-deadline-passed" };
+  }
+
+  const lastAttempt = observation.lastAttempt;
+  if (lastAttempt?.requestId === observation.requestId &&
+      lastAttempt.evidenceFingerprint === observation.evidenceFingerprint) {
+    // A reload can leave only the start record. Do not automatically repeat an
+    // uncertain attempt against identical evidence; explicit /compact can retry.
+    if (lastAttempt.outcome === "started") return { kind: "skip", reason: "unfinished-attempt-evidence" };
+    if (lastAttempt.outcome === "failed" || lastAttempt.outcome === "cancelled") {
+      return { kind: "skip", reason: "unchanged-failed-evidence" };
+    }
+  }
+  if (tokens >= configuration.targetTokens) return { kind: "compact", trigger: "size" };
+  if (!observation.cache) return { kind: "skip", reason: "below-size-target" };
+  if (tokens < configuration.targetTokens * configuration.idleMinFraction) {
+    return { kind: "skip", reason: "below-idle-minimum" };
+  }
+  const checkAt = observation.cache.expiresAt - configuration.expiryLeadMs;
+  if (now < checkAt) return { kind: "wait", checkAt };
+  return { kind: "compact", trigger: "expiry" };
 }
 
 // Clear the timer, establish attempt identity, and record its start in the session.
@@ -49,7 +81,9 @@ export function beginAttempt(
   clearTimeout(state.timer);
   state.timer = undefined;
 
-  const observation = readObservation(ctx);
+  const configuration = resolveCompactionConfig(pi.getSettings(), ctx.model);
+  if (configuration.kind === "invalid") throw new Error(configuration.reason);
+  const observation = readObservation(ctx, configuration.config);
   const attempt: NonNullable<CompactionState["attempt"]> = {
     id: randomUUID(),
     sessionId: ctx.sessionManager.getSessionId(),
@@ -57,16 +91,19 @@ export function beginAttempt(
     trigger,
     controller: new AbortController(),
     requestId: observation.requestId,
-    phase: "extracting",
+    evidenceFingerprint: observation.evidenceFingerprint,
+    phase: trigger === "manual" ? "extracting" : "requested",
   };
   state.attempt = attempt;
   pi.appendEntry(compactionAttemptType, {
     attemptId: attempt.id, sessionId: attempt.sessionId, requestId: attempt.requestId,
     trigger, outcome: "started",
+    evidenceFingerprint: attempt.evidenceFingerprint,
+    ...(observation.cache ? { cache: observation.cache } : {}),
   });
 }
 
-// Establish a manual attempt if needed. Reconstruct the warm prefix; append
+// Adopt the idle-triggered attempt, or establish a manual one. Reconstruct the warm prefix; append
 // checkpoint instructions; verify provider serialization before one request.
 // No tool execution, uncached fallback, or continuation. Validate output and recheck
 // cancellation/source identity before returning Pi's preparation boundary.
@@ -81,12 +118,27 @@ export async function generateCheckpoint(
   if (state.disposed || event.reason !== "manual") return { cancel: true };
   let attempt: CompactionState["attempt"];
   try {
-    beginAttempt(state, pi, ctx, "manual");
-    attempt = state.attempt;
-    if (!attempt) throw new Error("The manual compaction attempt was not created");
+    if (state.attempt) {
+      // ctx.compact() reports manual even when our idle check invoked it.
+      // Only the pre-hook requested phase can be adopted, never another extractor.
+      if ((state.attempt.trigger !== "size" && state.attempt.trigger !== "expiry") || state.attempt.phase !== "requested") {
+        return { cancel: true };
+      }
+      attempt = state.attempt;
+      if (state.generation !== attempt.generation) throw new Error("The requested compaction is stale");
+      attempt.controller.signal.throwIfAborted();
+      if (ctx.sessionManager.getSessionId() !== attempt.sessionId) throw new Error("The requested compaction belongs to another session");
+      attempt.phase = "extracting";
+    } else {
+      beginAttempt(state, pi, ctx, "manual");
+      attempt = state.attempt;
+    }
+    if (!attempt) throw new Error("The compaction attempt was not created");
 
+    const configuration = resolveCompactionConfig(pi.getSettings(), ctx.model);
+    if (configuration.kind === "invalid") throw new Error(configuration.reason);
     const sourceFingerprint = fingerprint(ctx.sessionManager.getBranch());
-    const response = await requestCheckpoint(ctx, event, attempt.controller.signal);
+    const response = await requestCheckpoint(ctx, event, attempt.controller.signal, configuration.config);
     // requestCheckpoint revalidates the source after generation. Recheck runtime
     // ownership too, before any more context access or handing output to Pi.
     if (state.disposed || state.attempt !== attempt || state.generation !== attempt.generation) {
@@ -184,7 +236,7 @@ export function finishAttempt(
 ): void {
   const attempt = state.attempt;
   if (!attempt || state.disposed || attempt.phase === "extracting") return;
-  if (event.reason !== "manual" || attempt.trigger !== "manual") return;
+  if (event.reason !== "manual") return;
   if (event.type === "session_compact") {
     const details = event.compactionEntry.details;
     if (!event.fromExtension || !object(details) || !object(details.checkpoint)) return;
@@ -203,6 +255,7 @@ export function finishAttempt(
   pi.appendEntry(compactionAttemptType, {
     attemptId: attempt.id, sessionId: attempt.sessionId, requestId: attempt.requestId,
     trigger: attempt.trigger, outcome,
+    evidenceFingerprint: attempt.evidenceFingerprint,
     ...(event.type === "session_compact" ? { compactionEntryId: event.compactionEntry.id } : {}),
   });
   if (event.type === "session_compact_failed" && ctx.hasUI) {

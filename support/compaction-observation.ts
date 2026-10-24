@@ -8,6 +8,7 @@ import {
   type ExtensionContext,
   type SessionEntry,
 } from "@earendil-works/pi-coding-agent";
+import { defaultCompactionConfig, resolveCacheLifetime, type CacheLifetimeSource, type CacheRetention, type CompactionConfig } from "./compaction-config.ts";
 
 export const requestObservationType = "compaction.request.v1";
 export const compactionAttemptType = "compaction.attempt.v1";
@@ -64,12 +65,17 @@ export interface RequestObservation extends RequestIdentity {
   // Capture at the same hook as pi-cached-compaction. The replay is checked in
   // its own onPayload callback; this metadata is not a wire observation.
   readonly provenance: "before_provider_request";
-  readonly cache: { readonly lifetime: "unknown"; readonly evidence: "serialized-session-cache-key" };
+  readonly cache: {
+    readonly lifetime: "unknown";
+    readonly evidence: "serialized-session-cache-key";
+    readonly retention?: CacheRetention;
+  };
 }
 
 export interface CompactionObservation {
   readonly requestId?: string;
   readonly request?: RequestObservation;
+  readonly evidenceFingerprint?: string;
   readonly eligibility:
     | { readonly kind: "candidate"; readonly reason: "on-payload-verification-required" }
     | { readonly kind: "unavailable"; readonly reason: string };
@@ -79,8 +85,18 @@ export interface CompactionObservation {
     readonly cacheWrite: number;
     readonly stopReason: string;
   };
-  readonly cache?: { readonly expiresAt: number; readonly source: string };
-  readonly lastAttempt?: { readonly requestId: string; readonly outcome: "started" | "committed" | "failed" | "cancelled" };
+  readonly cache?: {
+    readonly expiresAt: number;
+    readonly lifetimeMs: number;
+    readonly source: CacheLifetimeSource;
+    readonly refreshedAt: number;
+    readonly refreshSource: "request" | "cache-warm";
+  };
+  readonly lastAttempt?: {
+    readonly requestId: string;
+    readonly evidenceFingerprint?: string;
+    readonly outcome: "started" | "committed" | "failed" | "cancelled";
+  };
 }
 
 export function fingerprint(value: unknown): string {
@@ -252,7 +268,11 @@ export function observePayload(
     },
     ...(unavailableReason ? { unavailableReason } : {}),
     provenance: "before_provider_request",
-    cache: { lifetime: "unknown", evidence: "serialized-session-cache-key" },
+    cache: {
+      lifetime: "unknown", evidence: "serialized-session-cache-key",
+      // Pi's default retention tier at capture; no expiry is inferred here.
+      retention: process.env.PI_CACHE_RETENTION === "long" ? "long" : "short",
+    },
   };
   pi.appendEntry(requestObservationType, observation);
   return observation;
@@ -289,6 +309,7 @@ function parseObservation(value: unknown): RequestObservation | undefined {
   if (!object(value.cache) || value.cache.lifetime !== "unknown" || value.cache.evidence !== "serialized-session-cache-key") {
     return undefined;
   }
+  if (value.cache.retention !== undefined && !oneOf(value.cache.retention, ["short", "long"])) return undefined;
   if (value.unavailableReason !== undefined && !oneOf(value.unavailableReason, unavailableReasons)) return undefined;
 
   let replayParameters: CodexParameters | undefined;
@@ -332,7 +353,10 @@ function parseObservation(value: unknown): RequestObservation | undefined {
     },
     ...(value.unavailableReason === undefined ? {} : { unavailableReason: value.unavailableReason }),
     provenance: "before_provider_request",
-    cache: { lifetime: "unknown", evidence: "serialized-session-cache-key" },
+    cache: {
+      lifetime: "unknown", evidence: "serialized-session-cache-key",
+      ...(value.cache.retention === undefined ? {} : { retention: value.cache.retention }),
+    },
   };
 }
 
@@ -382,7 +406,7 @@ export function reconstructRequest(ctx: ExtensionContext, request: RequestObserv
   return { kind: "candidate", request, messages, verification: "on-payload-verification-required" };
 }
 
-export function readObservation(ctx: ExtensionContext): CompactionObservation {
+export function readObservation(ctx: ExtensionContext, config: CompactionConfig = defaultCompactionConfig): CompactionObservation {
   const unavailable = (reason: string): CompactionObservation => ({ eligibility: { kind: "unavailable", reason } });
   if (!supportedModel(ctx)) return unavailable("unsupported-provider-api");
   const branch = ctx.sessionManager.getBranch();
@@ -407,10 +431,22 @@ export function readObservation(ctx: ExtensionContext): CompactionObservation {
     eligibility = { kind: "candidate", reason: "on-payload-verification-required" };
   }
 
+  const cache = response && response.stopReason !== "error" && response.stopReason !== "aborted" && response.cacheRead + response.cacheWrite > 0
+    ? cacheObservation(ctx, request, branch.slice(index + 1), config)
+    : undefined;
+  // Attempt records do not change this identity. Visible source changes do,
+  // even when they still extend the same captured provider request.
+  const evidenceFingerprint = fingerprint({
+    requestId: request.id,
+    responseEntryId: response?.entryId,
+    context: fingerprint(convertToLlm(ctx.sessionManager.buildSessionProjection().messages)),
+    cache,
+  });
   const attemptEntry = branch.findLast((entry) =>
     entry.type === "custom" && entry.customType === compactionAttemptType && object(entry.data) &&
     entry.data.sessionId === request.sessionId && entry.data.requestId === request.id &&
-    identifier(entry.data.attemptId) && oneOf(entry.data.outcome, ["started", "committed", "failed", "cancelled"]),
+    identifier(entry.data.attemptId) && oneOf(entry.data.outcome, ["started", "committed", "failed", "cancelled"]) &&
+    (entry.data.evidenceFingerprint === undefined || fingerprintString(entry.data.evidenceFingerprint)),
   );
   const attemptData = attemptEntry?.type === "custom" && object(attemptEntry.data) ? attemptEntry.data : undefined;
   const outcome = attemptData?.outcome;
@@ -418,11 +454,49 @@ export function readObservation(ctx: ExtensionContext): CompactionObservation {
   return {
     requestId: request.id,
     request,
+    evidenceFingerprint,
     eligibility,
     ...(response ? { response } : {}),
+    ...(cache ? { cache } : {}),
     ...(oneOf(outcome, ["started", "committed", "failed", "cancelled"])
-      ? { lastAttempt: { requestId: request.id, outcome } }
+      ? { lastAttempt: {
+          requestId: request.id,
+          outcome,
+          ...(fingerprintString(attemptData?.evidenceFingerprint) ? { evidenceFingerprint: attemptData.evidenceFingerprint } : {}),
+        } }
       : {}),
+  };
+}
+
+function cacheObservation(
+  ctx: ExtensionContext,
+  request: RequestObservation,
+  entries: readonly SessionEntry[],
+  config: CompactionConfig,
+): CompactionObservation["cache"] {
+  const lifetime = resolveCacheLifetime(config, ctx.model?.promptCache, request.cache.retention);
+  if (!lifetime) return undefined;
+
+  // The original request timestamp is conservative: the cache input was sent
+  // before its response completed. Refresh usage is already persisted by Pi.
+  let refreshedAt = request.observedAt;
+  let refreshSource: "request" | "cache-warm" = "request";
+  for (const entry of entries) {
+    if (entry.type !== "usage" || entry.kind !== "cache_warm") continue;
+    if (entry.provider !== request.model.provider || entry.model !== request.model.id) continue;
+    if (!nonnegativeFiniteNumber(entry.usage?.cacheRead) || !nonnegativeFiniteNumber(entry.usage?.cacheWrite)) continue;
+    if (entry.usage.cacheRead + entry.usage.cacheWrite === 0) continue;
+    const timestamp = Date.parse(entry.timestamp);
+    if (!Number.isFinite(timestamp) || timestamp <= refreshedAt || timestamp > Date.now()) continue;
+    refreshedAt = timestamp;
+    refreshSource = "cache-warm";
+  }
+  return {
+    expiresAt: refreshedAt + lifetime.ms,
+    lifetimeMs: lifetime.ms,
+    source: lifetime.source,
+    refreshedAt,
+    refreshSource,
   };
 }
 

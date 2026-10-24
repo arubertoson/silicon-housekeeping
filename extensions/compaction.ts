@@ -1,10 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import * as compaction from "../support/compaction-draft.ts";
+import * as compaction from "../support/compaction.ts";
 
 export default function compactionExtension(pi: ExtensionAPI): void {
-  // Inactive until extraction, policy, and end-to-end validation are complete.
-  if (!compaction.compactionImplemented) return;
-
   // Only transient coordination lives here. Decision inputs live in the session.
   const state: compaction.CompactionState = { generation: 0 };
 
@@ -18,9 +15,16 @@ export default function compactionExtension(pi: ExtensionAPI): void {
     // Re-read current conditions, regardless of what originally armed the timer.
     // ctx.compact() aborts first: never interrupt a run or queued work.
     if (!ctx.isIdle() || ctx.hasPendingMessages() || state.attempt) return;
+    const configuration = compaction.resolveCompactionConfig(pi.getSettings(), ctx.model);
+    if (configuration.kind === "invalid") {
+      console.error("Automatic compaction disabled:", configuration.reason);
+      return;
+    }
+    if (!configuration.config.enabled) return;
     const decision = compaction.decideCompaction({
-      observation: compaction.readObservation(ctx),
+      observation: compaction.readObservation(ctx, configuration.config),
       contextUsage: ctx.getContextUsage(),
+      configuration: configuration.config,
       now: Date.now(),
     });
     if (decision.kind === "wait") {
@@ -67,7 +71,7 @@ export default function compactionExtension(pi: ExtensionAPI): void {
 
   // Both our triggers and explicit /compact use one extractor and format.
   // Validate prefix/output/source identity, then return Pi's retained-tail
-  // boundary with the checkpoint. Automatic compaction stays disabled.
+  // boundary with the checkpoint. Pi's built-in automatic compaction stays disabled.
   pi.on("session_before_compact", async (event, ctx) => {
     try {
       return await compaction.generateCheckpoint(state, pi, ctx, event);

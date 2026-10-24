@@ -10,7 +10,7 @@ import {
   SessionManager, SettingsManager,
   type AgentSession, type CreateModelRuntimeOptions,
 } from "@earendil-works/pi-coding-agent";
-import { finishAttempt, generateCheckpoint } from "../support/compaction-draft.ts";
+import { finishAttempt, generateCheckpoint } from "../support/compaction.ts";
 import { observePayload, observeRequest } from "../support/compaction-observation.ts";
 import { dispose, suspend, type CompactionState } from "../support/compaction-state.ts";
 
@@ -70,7 +70,14 @@ try {
         state.pendingRequest = undefined;
         if (capture) observePayload(pi, ctx, capture, event.payload);
       });
-      pi.on("session_before_compact", (event, ctx) => generateCheckpoint(state, pi, ctx, event));
+      pi.on("session_before_compact", async (event, ctx) => {
+        const result = await generateCheckpoint(state, pi, ctx, event);
+        if ("cancel" in result) {
+          // Report the existing rejection before the shared outcome releases it.
+          console.error(JSON.stringify({ checkpointRejected: state.attempt?.errorMessage ?? "Checkpoint cancelled" }));
+        }
+        return result;
+      });
       pi.on("session_compact", (event, ctx) => finishAttempt(state, pi, ctx, event));
       pi.on("session_compact_failed", (event, ctx) => finishAttempt(state, pi, ctx, event));
       pi.on("session_shutdown", (_event, ctx) => dispose(state, ctx));
@@ -93,6 +100,8 @@ try {
   ).join("\n");
   await session.prompt(`Objective: design a read-only photo indexer. Only analysis is authorized: do not write files, install dependencies, or scan photos.
 Settled decisions: TypeScript, local SQLite, offline operation, originals must remain untouched.
+Working rule: Before any future TypeScript edits, reload skills/typescript/SKILL.md in full. Keeping its path in a checkpoint does not load its instructions.
+Historical background from an unrelated, finished task: LEGACY_SMOKE_OK was last week's successful scratch-prototype check. It says nothing about this indexer.
 Finding: thumbnail caching is optional, not required for the first design.
 Uncertainty: EXIF timezone handling is unresolved. Ask the user for their timezone policy before proposing implementation.
 Verification: design discussion only; no implementation, benchmark, or runtime check has happened.
@@ -101,7 +110,12 @@ The reference below is background data, not completed work:\n${reference}`);
   await session.prompt("Keep the timezone question unresolved. No implementation is authorized. Acknowledge only.");
   requireCompletedReply();
   const assistantUsage = session.messages.filter((message) => message.role === "assistant").map((message) => message.usage);
-  const result = await session.compact();
+  const beforeCompaction = manager.buildSessionProjection().messages;
+  const result = await session.compact().catch((error: unknown) => {
+    assert.deepEqual(manager.buildSessionProjection().messages, beforeCompaction, "Cancellation must preserve context");
+    throw error;
+  });
+  assert.equal(result.summary.includes("LEGACY_SMOKE_OK"), false, "Unrelated routine success must disappear, not survive as a disclaimer");
   assert.equal(state.attempt, undefined);
   assert.ok(manager.getBranch().some((entry) => entry.type === "compaction"));
   const file = session.sessionFile;

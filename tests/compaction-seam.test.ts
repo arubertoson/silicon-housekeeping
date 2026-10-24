@@ -57,7 +57,8 @@ it.skipIf(!process.env.PI_COMPACTION_PROBE_CLI)("probes the installed CLI's embe
         else resolve(stdout);
       });
       child.stdin.on("error", () => { /* Process error/close diagnoses early exit. */ });
-      child.stdin.write(JSON.stringify({ id: "probe", type: "prompt", message: "/compaction-seam-probe" }) + "\n");
+      const scope = process.env.PI_COMPACTION_PROBE_SCOPE ?? "";
+      child.stdin.write(JSON.stringify({ id: "probe", type: "prompt", message: "/compaction-seam-probe " + scope }) + "\n");
     });
     const record = output.split("\n").find((line) => line.startsWith('{"compactionSeamProbe'));
     expect(record, output).toBeDefined();
@@ -66,7 +67,7 @@ it.skipIf(!process.env.PI_COMPACTION_PROBE_CLI)("probes the installed CLI's embe
     expect(decoded).not.toHaveProperty("compactionSeamProbeError");
     expect(decoded).toHaveProperty("compactionSeamProbe.version", "1.3.0");
     expect(decoded).toHaveProperty("compactionSeamProbe.checks");
-    console.log(JSON.stringify({ executable: await realpath(executable), result: decoded }));
+    process.stdout.write(JSON.stringify({ executable: await realpath(executable), result: decoded }) + "\n");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

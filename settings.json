@@ -8,6 +8,7 @@
   "hideThinkingBlock": true,
   "extensions": [
     "/home/macke/dev/home/github.com/arubertoson/silicon-housekeeping/extensions/prompt-editor.ts",
+    "/home/macke/dev/home/github.com/arubertoson/silicon-housekeeping/extensions/compaction.ts",
     "/home/macke/dev/home/github.com/arubertoson/silicon-housekeeping/extensions/zig-stdlib-search.ts",
     "/home/macke/dev/home/github.com/arubertoson/silicon-housekeeping/extensions/debug-toolcalls.ts",
     "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/whimsical.ts",
@@ -38,7 +39,14 @@
   "doubleEscapeAction": "none",
   "treeFilterMode": "default",
   "compaction": {
-    "enabled": false
+    "enabled": false,
+    "keepRecentTokens": 24000
+  },
+  "cacheAwareCompaction": {
+    "enabled": true,
+    "targetTokens": 156000,
+    "idleMinFraction": 0.7,
+    "expiryLeadSeconds": 30
   },
   "tuiMode": "fullscreen",
   "fullscreenScrollbar": "auto",

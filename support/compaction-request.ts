@@ -5,17 +5,43 @@ import {
   type SessionBeforeCompactEvent,
 } from "@earendil-works/pi-coding-agent";
 import { fingerprint, readObservation, reconstructRequest, type RequestObservation } from "./compaction-observation.ts";
+import { defaultCompactionConfig, type CompactionConfig } from "./compaction-config.ts";
 
 type Message = ReturnType<typeof convertToLlm>[number];
 type CheckpointResponse = Awaited<ReturnType<ExtensionContext["modelRegistry"]["complete"]>>;
 
 export const checkpointSections = [
-  { heading: "Intent", instruction: "The user's objective and expected outcome." },
-  { heading: "Constraints and Authority", instruction: "Binding instructions, prohibitions, scope, and what the user has or has not authorized. Do not invent restrictions or approval gates." },
-  { heading: "Progress and Findings", instruction: "Consequential completed work and findings, with exact paths and identifiers where needed." },
-  { heading: "Uncertainty and Verification", instruction: "Open questions, failures, and what was actually verified. Distinguish source inspection, offline fixtures, and live evidence; do not invent results." },
-  { heading: "Current State", instruction: "Relevant workspace/runtime state and unresolved blockers at the cutoff." },
-  { heading: "Next Action", instruction: "Preserve the concrete next step already agreed or required before the cutoff. If a user decision is needed, state the exact question to ask, not a generic wait. Describe the step without executing it or granting new authority." },
+  {
+    heading: "Intent",
+    instruction: "The current objective, expected outcome, and scope of unfinished work at the cutoff.",
+  },
+  {
+    heading: "Constraints and Authority",
+    instruction: `Binding instructions, prohibitions, scope, and what the user has or has not authorized.
+Preserve still-applicable skill names/paths and governing rules for unfinished work. When full instructions are needed, require reloading the skill before governed work.
+Do not invent restrictions, approval gates, or skill relevance, or claim a skill has been reloaded.`,
+  },
+  {
+    heading: "Progress and Findings",
+    instruction: `Only decisions and findings that still affect unfinished work, with exact identifiers where needed.
+Drop superseded investigations and historical accomplishments with no continuing consequence. Omit them entirely, not as caveats about their irrelevance.`,
+  },
+  {
+    heading: "Uncertainty and Verification",
+    instruction: `Current open questions, unresolved failures, and confidence in the current state.
+Mention verification only when it still supports that state, with its relevant scope and limits. Distinguish source inspection, offline fixtures, and live evidence when consequential; do not invent results.
+Discard stale routine test passes. Never imply that tests run before later changes verify those changes.`,
+  },
+  {
+    heading: "Current State",
+    instruction: `Unfinished work, blockers, and immediate workspace/runtime state. Include outstanding operations, effects, or IDs needed to avoid repeating work.
+Keep source paths and symbols only where they help resume. Touched files do not establish an active working set; current sources are authoritative, not old read outputs.`,
+  },
+  {
+    heading: "Next Action",
+    instruction: `Preserve the concrete next step already agreed or required before the cutoff.
+If a user decision is needed, state the exact question to ask, not a generic wait. Describe the step without executing it or granting new authority.`,
+  },
 ] as const;
 
 function messageOpening(message: Message): string | undefined {
@@ -53,7 +79,10 @@ Summarize the conversation BEFORE the retained tail. The final ${messages.length
 ${opening}
 </retained-tail-start>
 
-Treat that message and everything after it as not yet happened. Do not duplicate retained work in completed findings. Fold any earlier checkpoint into the new checkpoint.
+Treat that message and everything after it as not yet happened. Do not duplicate the recent exchanges that remain verbatim. Fold any earlier checkpoint into the new checkpoint, discarding superseded material.
+
+Write a current-state handoff, not a changelog. Older tool calls normally leave nothing behind: retain a resulting fact only if it still matters. Do not catalogue calls, their intentions, old file contents, or routine successes.
+Do not reread files, reload skills, or scan the repository while producing this checkpoint.
 
 Use these headings:
 ${checkpointSections.map((section) => `## ${section.heading}\n${section.instruction}`).join("\n")}
@@ -105,16 +134,20 @@ export async function requestCheckpoint(
   ctx: ExtensionContext,
   event: SessionBeforeCompactEvent,
   extractionSignal: AbortSignal,
+  configuration: CompactionConfig = defaultCompactionConfig,
 ): Promise<CheckpointResponse> {
   const signal = AbortSignal.any([event.signal, extractionSignal]);
   signal.throwIfAborted();
   if (event.reason !== "manual") throw new Error("Only manual checkpoint requests are implemented");
 
-  const observation = readObservation(ctx);
+  const observation = readObservation(ctx, configuration);
   if (observation.eligibility.kind !== "candidate" || !observation.request) {
     throw new Error(`Checkpoint unavailable: ${observation.eligibility.reason}`);
   }
   const request = observation.request;
+  if (observation.cache && Date.now() >= observation.cache.expiresAt) {
+    throw new Error("The checkpoint cache deadline has passed");
+  }
   const model = ctx.model;
   if (!model) throw new Error("No model is selected for checkpoint generation");
   const sourceLeaf = ctx.sessionManager.getLeafId();
@@ -147,6 +180,10 @@ export async function requestCheckpoint(
     toolChoice: request.parameters?.toolChoice,
     onPayload(params) {
       checkSource();
+      const current = readObservation(ctx, configuration);
+      if (current.cache && Date.now() >= current.cache.expiresAt) {
+        throw new Error("The checkpoint cache deadline passed before sending");
+      }
       const payload = checkpointPayload(params, request);
       prefixVerified = true;
       return payload;

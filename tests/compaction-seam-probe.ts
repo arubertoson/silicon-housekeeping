@@ -11,6 +11,7 @@ import {
   type ProviderConfig, type SessionBeforeCompactEvent, type SessionBeforeCompactResult,
 } from "@earendil-works/pi-coding-agent";
 import { compactionObservationCases } from "./compaction-observation-probe.ts";
+import { verifyFinalCompactionIntegration } from "./compaction-final-probe.ts";
 
 const provider = "compaction-seam-probe";
 const modelId = "offline-fixture";
@@ -192,6 +193,7 @@ async function withFixture(
 }
 
 export const compactionSeamCases: Record<string, () => Promise<unknown>> = {
+  "final extension loads and compacts with the selected budgets": verifyFinalCompactionIntegration,
   async "manual compaction commits the hook result and rebuilds persisted context"() {
     return withFixture({}, async ({ runtime, trace, requests, hookErrors }) => {
       const session = runtime.session;
@@ -611,11 +613,26 @@ export const compactionSeamCases: Record<string, () => Promise<unknown>> = {
   },
 };
 
-export async function runCompactionSeamProbe() {
+export async function runCompactionSeamProbe(scope = "") {
+  if (scope !== "" && scope !== "final") throw new Error("Unknown compaction probe scope");
+  const finalNames = new Set([
+    "final extension loads and compacts with the selected budgets",
+    "checkpoint request extends the native Codex prefix without replacing context",
+    "manual checkpoint rejects invalid output without default fallback",
+    "unsupported models and changed model, session, thinking, or serializer identity are rejected",
+    "active-branch reads reject corrupted, edited, or abandoned request sources",
+    "runtime disposal aborts a pending hook and rejects its late result",
+    "session replacement aborts extraction before shutdown and rejects its late result",
+  ]);
   const checks: Record<string, unknown> = {};
-  for (const [name, run] of Object.entries({ ...compactionSeamCases, ...compactionObservationCases })) checks[name] = await run();
+  for (const [name, run] of Object.entries({ ...compactionSeamCases, ...compactionObservationCases })) {
+    if (scope === "final" && !finalNames.has(name)) continue;
+    checks[name] = await run();
+  }
+  if (scope === "final") assert.equal(Object.keys(checks).length, finalNames.size);
   return {
     version: VERSION,
+    scope: scope || "all",
     runtime: { execPath: process.execPath, node: process.versions.node, bun: process.versions.bun, platform: process.platform, arch: process.arch },
     checks,
   };
@@ -629,9 +646,9 @@ export default function compactionSeamProbe(pi: ExtensionAPI): void {
   });
   pi.registerCommand("compaction-seam-probe", {
     description: "Verify offline compaction contracts against this runtime",
-    handler: async (_args, ctx) => {
+    handler: async (args, ctx) => {
       try {
-        console.log(JSON.stringify({ compactionSeamProbe: await runCompactionSeamProbe() }));
+        console.log(JSON.stringify({ compactionSeamProbe: await runCompactionSeamProbe(args.trim()) }));
       } catch (error) {
         console.log(JSON.stringify({ compactionSeamProbeError: error instanceof Error ? error.stack : String(error) }));
       } finally { ctx.shutdown(); }

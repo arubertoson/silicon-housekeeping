@@ -15,12 +15,12 @@ import { compactionAttemptType, fingerprint, observePayload, observeRequest, rea
   type RequestCapture, type RequestObservation } from "../support/compaction-observation.ts";
 import { dispose, type CompactionState } from "../support/compaction-state.ts";
 import { requestCheckpoint } from "../support/compaction-request.ts";
-import { finishAttempt, generateCheckpoint } from "../support/compaction-draft.ts";
+import { finishAttempt, generateCheckpoint } from "../support/compaction.ts";
 
 const modelId = "gpt-5.4";
 const token = `e30.${Buffer.from(JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "offline-account" } })).toString("base64")}.fixture`;
 
-const fixtureCheckpoint = `## Intent
+export const fixtureCheckpoint = `## Intent
 Preserve the fixture task.
 ## Constraints and Authority
 No tool execution or task continuation is authorized.
@@ -39,16 +39,24 @@ function installManualCheckpoint(pi: ExtensionAPI, state: CompactionState): void
   pi.on("session_compact_failed", (event, ctx) => finishAttempt(state, pi, ctx, event));
 }
 
-async function withCodex(
+export async function withCodex(
   options: {
     beforeObserver?: ExtensionFactory;
     afterObserver?: ExtensionFactory;
     transport?: "sse" | "auto";
     summaryText?: string;
     beforeCheckpointReply?: () => void | Promise<void>;
+    extension?: ExtensionFactory;
+    extensionPath?: string;
+    historyMessages?: number;
+    contextTokens?: number;
+    keepRecentTokens?: number;
+    compactionConfig?: unknown;
+    promptCache?: { short?: number; long?: number };
   },
   run: (fixture: { session: AgentSession; ctx: () => ExtensionContext; pi: () => ExtensionAPI;
-    observations: RequestObservation[]; bodies: unknown[]; trace: string[]; state: CompactionState; errors: string[] }) => Promise<unknown>,
+    observations: RequestObservation[]; bodies: unknown[]; trace: string[]; state: CompactionState; errors: string[];
+    loader: DefaultResourceLoader }) => Promise<unknown>,
 ): Promise<unknown> {
   const root = await mkdtemp(join(tmpdir(), "pi-compaction-observe-"));
   // These cases run sequentially, also inside the isolated CLI. Ensure ambient
@@ -79,7 +87,7 @@ async function withCodex(
         { type: "response.output_text.delta", output_index: 0, content_index: 0, delta: text },
         { type: "response.output_item.done", output_index: 0, item },
         { type: "response.completed", response: { id: "resp_fixture", status: "completed", output: [item],
-          usage: { input_tokens: 120, output_tokens: 5, input_tokens_details: { cached_tokens: 80 } } } },
+          usage: { input_tokens: options.contextTokens ?? 120, output_tokens: 5, input_tokens_details: { cached_tokens: 80 } } } },
       ];
       response.writeHead(200, { "content-type": "text/event-stream" });
       response.end(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""));
@@ -105,14 +113,15 @@ async function withCodex(
     runtime.registerProvider("openai-codex", {
       api: "openai-codex-responses", apiKey: token, baseUrl: `http://127.0.0.1:${address.port}`,
       models: [{ id: modelId, name: "Offline Codex serializer", reasoning: true, input: ["text", "image"],
-        contextWindow: 32_000, maxTokens: 4096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }],
+        contextWindow: 272_000, maxTokens: 4096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        ...(options.promptCache ? { promptCache: options.promptCache } : {}) }],
     });
     const model = runtime.getModel("openai-codex", modelId);
     assert.ok(model);
     const observations: RequestObservation[] = [];
     let context: ExtensionContext | undefined;
     let api: ExtensionAPI | undefined;
-    const observer: ExtensionFactory = (pi) => {
+    const observer: ExtensionFactory = async (pi) => {
       api = pi;
       pi.registerTool({ name: "fixture_tool", label: "Fixture", description: "TOOL_DESCRIPTION_MARKER",
         parameters: Type.Object({ input: Type.String() }),
@@ -120,7 +129,7 @@ async function withCodex(
       pi.on("session_start", (_event, ctx) => { context = ctx; });
       pi.on("context_with_system", (event, ctx) => {
         trace.push("context");
-        state.pendingRequest = observeRequest(ctx, event.messages);
+        if (!options.extension && !options.extensionPath) state.pendingRequest = observeRequest(ctx, event.messages);
       });
       pi.on("before_provider_request", (event, ctx) => {
         trace.push("payload");
@@ -133,14 +142,18 @@ async function withCodex(
       });
       pi.on("before_provider_headers", () => { trace.push("headers"); });
       pi.on("after_provider_response", () => { trace.push("response"); });
+      await options.extension?.(pi);
     };
-    const settings = SettingsManager.inMemory({ compaction: { enabled: false, keepRecentTokens: 20, reserveTokens: 4096 }, cacheWarming: "off", transport: options.transport ?? "sse",
-      retry: { enabled: false, provider: { maxRetries: 0 } } });
+    const settings = SettingsManager.inMemory({ compaction: { enabled: false, keepRecentTokens: options.keepRecentTokens ?? 20, reserveTokens: 4096 }, cacheWarming: "off", transport: options.transport ?? "sse",
+      retry: { enabled: false, provider: { maxRetries: 0 } },
+      ...(options.compactionConfig === undefined ? {} : { cacheAwareCompaction: options.compactionConfig }) });
     const loader = new DefaultResourceLoader({ cwd, agentDir, settingsManager: settings,
+      additionalExtensionPaths: options.extensionPath ? [options.extensionPath] : [],
       noExtensions: true, noSkills: true, noThemes: true, noPromptTemplates: true, noContextFiles: true,
       extensionFactories: [...(options.beforeObserver ? [options.beforeObserver] : []), observer, ...(options.afterObserver ? [options.afterObserver] : [])],
       systemPromptOverride: () => "SYSTEM_INSTRUCTION_MARKER", appendSystemPromptOverride: () => [] });
     await loader.reload();
+    assert.deepEqual(loader.getExtensions().errors, []);
     const manager = SessionManager.create(cwd, agentDir);
     manager.appendMessage({ role: "user", content: [
       { type: "text", text: "PRIOR_USER_MARKER" },
@@ -158,18 +171,28 @@ async function withCodex(
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } });
     manager.appendMessage({ role: "toolResult", toolCallId: "call_fixture|fc_fixture", toolName: "fixture_tool",
       content: [{ type: "text", text: "TOOL_RESULT_MARKER" }], isError: false, timestamp: 102 });
+    // Optional synthetic background makes the real 24k retained budget meaningful.
+    for (let index = 0; index < (options.historyMessages ?? 0); index++) {
+      manager.appendMessage({ role: "user", content: `BACKGROUND_${index} ` + "history ".repeat(4000), timestamp: 200 + index });
+    }
     ({ session } = await createAgentSession({ cwd, agentDir, modelRuntime: runtime, model, thinkingLevel: "high", settingsManager: settings,
       sessionManager: manager, resourceLoader: loader, tools: ["fixture_tool"] }));
     await session.bindExtensions({ onError: (error) => errors.push(error.error) });
-    return await run({ session, ctx: () => { assert.ok(context); return context; }, pi: () => { assert.ok(api); return api; }, observations, bodies, trace, state, errors });
+    return await run({ session, ctx: () => { assert.ok(context); return context; }, pi: () => { assert.ok(api); return api; }, observations, bodies, trace, state, errors, loader });
   } finally {
     try {
-      // Cleanup deliberately tolerates invalid extension contexts.
-      dispose(state, {} as ExtensionContext);
-      session?.dispose();
-      server.closeAllConnections();
-      await new Promise<void>((resolve) => server.close(() => resolve()));
-      await rm(root, { recursive: true, force: true });
+      try {
+        // File-loaded SDK fixtures own timers too. Emit shutdown before disposal
+        // invalidates their contexts; always close resources if it fails.
+        if (options.extensionPath) await session?.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+      } finally {
+        // Cleanup deliberately tolerates invalid extension contexts.
+        dispose(state, {} as ExtensionContext);
+        session?.dispose();
+        server.closeAllConnections();
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+        await rm(root, { recursive: true, force: true });
+      }
     } finally {
       if (previousNoProxy === undefined) delete process.env.no_proxy;
       else process.env.no_proxy = previousNoProxy;
@@ -272,6 +295,10 @@ export const compactionObservationCases: Record<string, () => Promise<unknown>> 
       assert.deepEqual({ ...summary, input: original.input }, original, "Instructions, tools, settings and session key stay unchanged");
       assert.match(JSON.stringify(summary.input.at(-1)), /SUMMARY_FOCUS_MARKER/);
       assert.match(JSON.stringify(summary.input.at(-1)), /Constraints and Authority/);
+      const instruction = JSON.stringify(summary.input.at(-1));
+      assert.match(instruction, /current-state handoff, not a changelog/);
+      assert.match(instruction, /Discard stale routine test passes/);
+      assert.match(instruction, /reloading the skill before governed work/);
       assert.equal(observations.length, 1, "The nested checkpoint must not become a main-agent capture");
       assert.deepEqual(session.sessionManager.getEntries(), before);
       assert.deepEqual(errors, []);
