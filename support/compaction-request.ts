@@ -4,7 +4,7 @@ import {
   type ExtensionContext,
   type SessionBeforeCompactEvent,
 } from "@earendil-works/pi-coding-agent";
-import { fingerprint, readObservation, reconstructRequest, type RequestObservation } from "./compaction-observation.ts";
+import { fingerprint, projectRequestMessages, readObservation, reconstructRequest, type RequestObservation } from "./compaction-observation.ts";
 import { defaultCompactionConfig, type CompactionConfig } from "./compaction-config.ts";
 
 type Message = ReturnType<typeof convertToLlm>[number];
@@ -153,9 +153,10 @@ export async function requestCheckpoint(
   const model = ctx.model;
   if (!model) throw new Error("No model is selected for checkpoint generation");
   const sourceLeaf = ctx.sessionManager.getLeafId();
-  const messages = convertToLlm(ctx.sessionManager.buildSessionProjection().messages);
-  const sourceFingerprint = fingerprint(messages);
-  const instruction = checkpointInstruction(event, messages);
+  const sourceMessages = convertToLlm(ctx.sessionManager.buildSessionProjection().messages);
+  const sourceFingerprint = fingerprint(sourceMessages);
+  const messages = projectRequestMessages(sourceMessages, request);
+  const instruction = checkpointInstruction(event, sourceMessages);
 
   function checkSource(): void {
     // Test the caller-owned signal before accessing a possibly invalid context.

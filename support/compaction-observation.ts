@@ -52,6 +52,7 @@ interface CodexParameters {
 }
 
 export interface RequestObservation extends RequestIdentity {
+  readonly hiddenToolNames?: readonly string[];
   readonly transport: "sse" | "auto" | "websocket" | "websocket-cached" | "unknown";
   readonly parameters?: CodexParameters;
   readonly payloadFingerprint: string;
@@ -246,6 +247,12 @@ export function observePayload(
     }
   }
 
+  // Pi can hide active declarations (for example codemode-only) without changing
+  // the stored transcript. Keep only the hidden identities needed for replay.
+  const visibleTools = new Set(Array.isArray(payload.tools) ? payload.tools.flatMap((tool) =>
+    object(tool) && typeof tool.name === "string" ? [tool.name] : []) : []);
+  const hiddenToolNames = pi.getActiveTools().filter((name) => !visibleTools.has(name));
+
   // Explicit allowlist: no messages, prompt/tool bodies, headers, tokens, unknown
   // settings, or a duplicate usage store. The branch already owns those inputs.
   const observation: RequestObservation = {
@@ -260,6 +267,7 @@ export function observePayload(
     transport,
     ...(replayParameters ? { parameters: replayParameters } : {}),
     payloadFingerprint: fingerprint(payload),
+    hiddenToolNames,
     prefix: {
       instructions: fingerprint(payload.instructions),
       tools: fingerprint(payload.tools),
@@ -312,6 +320,16 @@ function parseObservation(value: unknown): RequestObservation | undefined {
   if (value.cache.retention !== undefined && !oneOf(value.cache.retention, ["short", "long"])) return undefined;
   if (value.unavailableReason !== undefined && !oneOf(value.unavailableReason, unavailableReasons)) return undefined;
 
+  let hiddenToolNames: string[] | undefined;
+  if (value.hiddenToolNames !== undefined) {
+    if (!Array.isArray(value.hiddenToolNames)) return undefined;
+    hiddenToolNames = [];
+    for (const name of value.hiddenToolNames) {
+      if (typeof name !== "string" || !identifier(name)) return undefined;
+      hiddenToolNames.push(name);
+    }
+  }
+
   let replayParameters: CodexParameters | undefined;
   if (value.parameters !== undefined) {
     const persistedParameters = value.parameters;
@@ -340,6 +358,7 @@ function parseObservation(value: unknown): RequestObservation | undefined {
     transcriptFingerprint: value.transcriptFingerprint,
     modelFingerprint: value.modelFingerprint,
     payloadFingerprint: value.payloadFingerprint,
+    ...(hiddenToolNames === undefined ? {} : { hiddenToolNames }),
     model: { provider: "openai-codex", api: "openai-codex-responses", id: value.model.id },
     sdkVersion: value.sdkVersion,
     observedAt: value.observedAt,
@@ -358,6 +377,27 @@ function parseObservation(value: unknown): RequestObservation | undefined {
       ...(value.cache.retention === undefined ? {} : { retention: value.cache.retention }),
     },
   };
+}
+
+// Match Pi's hidden-declarations projection without modifying stored messages.
+// Source identity checks still use the unprojected persisted transcript.
+export function projectRequestMessages(
+  messages: ReturnType<typeof convertToLlm>,
+  request: RequestObservation,
+): ReturnType<typeof convertToLlm> {
+  const hidden = new Set(request.hiddenToolNames);
+  if (hidden.size === 0) return messages;
+  return messages.map((message) => {
+    if (message.role !== "system" || (!message.toolsAdded && !message.toolsRemoved)) return message;
+    const { toolsAdded, toolsRemoved, ...rest } = message;
+    const added = toolsAdded?.filter((tool) => !hidden.has(tool.name)) ?? [];
+    const removed = toolsRemoved?.filter((tool) => !hidden.has(tool.name)) ?? [];
+    return {
+      ...rest,
+      ...(added.length > 0 ? { toolsAdded: added } : {}),
+      ...(removed.length > 0 ? { toolsRemoved: removed } : {}),
+    };
+  });
 }
 
 export type RequestReconstruction =
@@ -403,7 +443,7 @@ export function reconstructRequest(ctx: ExtensionContext, request: RequestObserv
 
   // Match this capture against the replay's provider serialization before send,
   // following pi-cached-compaction. Compatibility does not prove a cache hit.
-  return { kind: "candidate", request, messages, verification: "on-payload-verification-required" };
+  return { kind: "candidate", request, messages: projectRequestMessages(messages, request), verification: "on-payload-verification-required" };
 }
 
 export function readObservation(ctx: ExtensionContext, config: CompactionConfig = defaultCompactionConfig): CompactionObservation {
