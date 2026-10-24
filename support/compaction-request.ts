@@ -145,6 +145,8 @@ export async function requestCheckpoint(
     throw new Error(`Checkpoint unavailable: ${observation.eligibility.reason}`);
   }
   const request = observation.request;
+  const transport = request.transport;
+  if (transport !== "sse" && transport !== "auto") throw new Error("Unsupported checkpoint transport");
   if (observation.cache && Date.now() >= observation.cache.expiresAt) {
     throw new Error("The checkpoint cache deadline has passed");
   }
@@ -168,12 +170,14 @@ export async function requestCheckpoint(
     }
   }
 
+  // Keep Pi's session/transport handling, including auto's cached WebSocket
+  // deltas. onPayload still compares the full logical prefix before that step.
   let prefixVerified = false;
   const response = await ctx.modelRegistry.streamSimple(model, {
     messages: [...messages, { role: "user", content: [{ type: "text", text: instruction }], timestamp: Date.now() }],
   }, {
     sessionId: request.sessionId,
-    transport: "sse",
+    transport,
     signal,
     maxRetries: 0,
     maxTokens: Math.min(Math.floor(0.8 * event.preparation.settings.reserveTokens), model.maxTokens > 0 ? model.maxTokens : Infinity),

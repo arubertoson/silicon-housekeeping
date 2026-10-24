@@ -235,7 +235,7 @@ export function observePayload(
 
   let unavailableReason = capture.unavailableReason;
   if (unavailableReason === undefined) {
-    if (transport !== "sse") {
+    if (transport !== "sse" && transport !== "auto") {
       unavailableReason = "unsupported-transport";
     } else if (settings.images?.blockImages) {
       unavailableReason = "blocked-images";
@@ -378,7 +378,7 @@ export function reconstructRequest(ctx: ExtensionContext, request: RequestObserv
   }
   if (Object.keys(ctx.model?.headers ?? {}).length) return unavailable("custom-model-headers");
   if (request.unavailableReason) return unavailable(request.unavailableReason);
-  if (request.transport !== "sse") return unavailable("unsupported-transport");
+  if (request.transport !== "sse" && request.transport !== "auto") return unavailable("unsupported-transport");
   if (!request.parameters) return unavailable("unsupported-payload-settings");
 
   const branch = ctx.sessionManager.getBranch();

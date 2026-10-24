@@ -554,13 +554,17 @@ export const compactionObservationCases: Record<string, () => Promise<unknown>> 
     });
   },
 
-  async "Codex auto transport is explicitly unsupported even when it falls back to SSE"() {
-    return withCodex({ transport: "auto" }, async ({ session, ctx, observations, bodies }) => {
+  async "Codex auto transport compacts through Pi's SSE fallback"() {
+    return withCodex({ transport: "auto", summaryText: fixtureCheckpoint }, async ({ session, pi, ctx, state, observations, bodies, errors }) => {
       await session.prompt("Auto transport");
-      assert.equal(bodies.length, 1);
-      assert.equal(observations[0].unavailableReason, "unsupported-transport");
-      assert.equal(readObservation(ctx()).eligibility.reason, "unsupported-transport");
-      return { autoRejected: true, noAssumedWebsocketPrefix: true };
+      assert.equal(observations[0].transport, "auto");
+      assert.equal(readObservation(ctx()).eligibility.kind, "candidate");
+      installManualCheckpoint(pi(), state);
+      const result = await session.compact();
+      assert.equal(result.summary, fixtureCheckpoint);
+      assert.equal(bodies.length, 2);
+      assert.deepEqual(errors, []);
+      return { autoEligible: true, committed: true, requests: 2, liveCacheMeasured: false };
     });
   },
 

@@ -19,6 +19,8 @@ export async function verifyFinalCompactionIntegration(): Promise<Record<string,
   assert.equal(configuration.expiryLeadMs, 30_000);
   assert.equal(configuration.idleTimeout, undefined);
   assert.ok(settings && typeof settings === "object" && "compaction" in settings);
+  const transport = "transport" in settings ? settings.transport : "auto";
+  assert.ok(transport === "sse" || transport === "auto", "Final profile must use a supported captured transport");
   assert.ok(settings.compaction && typeof settings.compaction === "object" && "keepRecentTokens" in settings.compaction);
   assert.equal(settings.compaction.keepRecentTokens, 24_000);
   assert.ok("enabled" in settings.compaction && settings.compaction.enabled === false);
@@ -35,11 +37,11 @@ export async function verifyFinalCompactionIntegration(): Promise<Record<string,
   const sourcePath = fileURLToPath(new URL("../extensions/compaction.ts", import.meta.url));
   assert.ok("extensions" in settings && Array.isArray(settings.extensions) && settings.extensions.includes(sourcePath));
   const checks: Record<string, unknown> = {};
-  await withCodex({ extensionPath: sourcePath, keepRecentTokens: 24_000, compactionConfig: profilePolicy },
+  await withCodex({ extensionPath: sourcePath, transport, keepRecentTokens: 24_000, compactionConfig: profilePolicy },
     async ({ loader }) => {
       const loaded = loader.getExtensions().extensions.find((extension) => extension.path === sourcePath);
       assert.ok(loaded?.handlers.has("session_before_compact"), "The exact active extension must load through Pi");
-      checks.productionLoad = { loaded: true, activated: true, targetTokens: configuration.targetTokens,
+      checks.productionLoad = { loaded: true, activated: true, transport, targetTokens: configuration.targetTokens,
         idleMinimumTokens: Math.ceil(configuration.targetTokens * configuration.idleMinFraction), keepRecentTokens: 24_000 };
     });
 
@@ -48,7 +50,7 @@ export async function verifyFinalCompactionIntegration(): Promise<Record<string,
     const policy = trigger === "expiry"
       ? { ...profilePolicy, enabled: true, idleTimeoutSeconds: 0.4, expiryLeadSeconds: 0.1 }
       : { ...profilePolicy, enabled: trigger !== "manual" };
-    await withCodex({ extensionPath: sourcePath, keepRecentTokens: 24_000, historyMessages: 8,
+    await withCodex({ extensionPath: sourcePath, transport, keepRecentTokens: 24_000, historyMessages: 8,
       compactionConfig: policy, contextTokens: trigger === "expiry" ? 120_000 : 156_100, summaryText: fixtureCheckpoint },
       async ({ session, pi, ctx, bodies, loader, errors }) => {
         const loaded = loader.getExtensions().extensions.find((extension) => extension.path === sourcePath);
@@ -66,7 +68,10 @@ export async function verifyFinalCompactionIntegration(): Promise<Record<string,
         assert.equal(event.compactionEntry.firstKeptEntryId, boundary);
         assert.deepEqual(session.agent.state.messages, session.sessionManager.buildSessionProjection().messages);
         assert.ok(session.sessionFile);
-        assert.deepEqual(SessionManager.open(session.sessionFile).buildSessionProjection(), session.sessionManager.buildSessionProjection());
+        // Native auto fallback records diagnostics containing undefined fields;
+        // reopening must preserve their JSON values, not absent-vs-undefined keys.
+        const reopened = SessionManager.open(session.sessionFile).buildSessionProjection();
+        assert.deepEqual(JSON.parse(JSON.stringify(reopened)), JSON.parse(JSON.stringify(session.sessionManager.buildSessionProjection())));
         assert.equal(readObservation(ctx()).lastAttempt?.outcome, "committed");
         const outcome = session.sessionManager.getBranch().findLast((entry) =>
           entry.type === "custom" && entry.customType === compactionAttemptType);
@@ -81,7 +86,7 @@ export async function verifyFinalCompactionIntegration(): Promise<Record<string,
   }
 
   let reload = async () => {};
-  await withCodex({ extensionPath: sourcePath, keepRecentTokens: 24_000, historyMessages: 8,
+  await withCodex({ extensionPath: sourcePath, transport, keepRecentTokens: 24_000, historyMessages: 8,
     compactionConfig: { ...profilePolicy, enabled: false }, summaryText: fixtureCheckpoint,
     beforeCheckpointReply: () => reload() }, async ({ session, ctx, bodies, loader, errors }) => {
       await session.prompt("Preserve this context if the checkpoint is interrupted by reload.");
