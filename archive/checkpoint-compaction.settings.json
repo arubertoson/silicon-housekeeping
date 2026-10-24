@@ -1,0 +1,6 @@
+{
+  "checkpointCompaction": {
+    "triggerTokens": 158000,
+    "rebuiltContextTokens": 16000
+  }
+}

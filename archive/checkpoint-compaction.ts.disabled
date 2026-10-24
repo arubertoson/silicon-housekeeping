@@ -89,19 +89,23 @@ function retainedBoundary(manager: SessionManager, persistedIds: Set<string>, bu
 		const messages = entries[i].messages.filter((message) => message.role !== "system" && message.role !== "compactionSummary");
 		suffixTokens[i] = suffixTokens[i + 1] + conversationTokens(messages);
 	}
+	const hasProposedMessages = entries.some((entry) => !persistedIds.has(entry.sourceEntry.id) && conversationTokens(entry.messages) > 0);
+	const mustRetain = minimum !== undefined || hasProposedMessages;
+	let fallback: string | null = null;
 	for (let i = start; i < entries.length; i++) {
 		const entry = entries[i];
 		// Draft IDs are preview-local; only persisted IDs can be committed as a cut.
 		if (!persistedIds.has(entry.sourceEntry.id) || entry.sourceEntry.type === "compaction") continue;
 		if (entry.messages.some((message) => message.role === "system" || message.role === "toolResult")) continue;
-		if (suffixTokens[i] > budget) continue;
+		if (suffixTokens[i] > budget && !mustRetain) continue;
 		const suffix = entries.slice(i).flatMap((item) => item.messages).filter((message) => message.role !== "system" && message.role !== "compactionSummary");
-		if (validToolPairs(suffix)) return entry.sourceEntry.id;
+		if (!validToolPairs(suffix)) continue;
+		if (suffixTokens[i] <= budget) return entry.sourceEntry.id;
+		fallback = entry.sourceEntry.id;
 	}
-	// Never silently drop another handler's newly proposed model-visible content.
-	if (entries.some((entry) => !persistedIds.has(entry.sourceEntry.id) && conversationTokens(entry.messages) > 0)) {
-		throw new Error("Proposed boundary messages cannot fit the rebuilt-context budget.");
-	}
+	// The target is soft; required suffixes take priority over its estimate.
+	if (fallback) return fallback;
+	if (hasProposedMessages) throw new Error("No tool-safe persisted boundary preserves proposed messages.");
 	return null; // The checkpoint contains the completed batch's consequential state.
 }
 
@@ -207,8 +211,9 @@ async function extractCheckpoint(
 	const goal = persistedGoal ? { id: persistedGoal.id, objective: persistedGoal.objective, status: persistedGoal.status } : null;
 	const overhead = systemTokens(manager.buildSessionContext().messages) + conversationTokens(pending);
 	const available = policy.rebuiltContextTokens - overhead;
-	const maxTokens = Math.min(Math.floor(available / 2), model.maxTokens > 0 ? model.maxTokens : Infinity);
-	if (maxTokens < 256) throw new Error(`Rebuilt-context budget ${policy.rebuiltContextTokens} cannot fit system/tools, pending messages and a checkpoint (overhead: ${overhead} estimated tokens).`);
+	// Rebuilt context is a best-effort target, not an extraction output cap.
+	// Fixed overhead may already exceed it; still extract essential state.
+	const maxTokens = model.maxTokens > 0 ? model.maxTokens : undefined;
 	const messages = manager.buildSessionContext().messages.filter((message) =>
 		message.role !== "system" && !(saved && message.role === "compactionSummary"));
 	const conversation = serializeConversation(convertToLlm(messages));
@@ -216,7 +221,7 @@ async function extractCheckpoint(
 		systemPrompt: COMPACTION_PROMPT,
 		messages: [{
 			role: "user",
-			content: `Canonical goal (if present; status is not authorization):\n${JSON.stringify(goal)}\n\nPrevious structured continuation:\n${JSON.stringify(saved ?? null)}\n\nCurrent projected conversation (including the retained recent tail):\n${conversation}\n\nQueued messages not yet in session history (evidence for reconciling the checkpoint only; preserve them as separate queued messages, do not copy or answer them in the checkpoint):\n${pending.length ? serializeConversation(convertToLlm(pending)) : "None"}\n\nCompaction focus:\n${focus}\n\nExtraction output limit: ${maxTokens} tokens. Preserve essential agreements; do not fabricate a smaller contract by silently dropping them.`,
+			content: `Canonical goal (if present; status is not authorization):\n${JSON.stringify(goal)}\n\nPrevious structured continuation:\n${JSON.stringify(saved ?? null)}\n\nCurrent projected conversation (including the retained recent tail):\n${conversation}\n\nQueued messages not yet in session history (evidence for reconciling the checkpoint only; preserve them as separate queued messages, do not copy or answer them in the checkpoint):\n${pending.length ? serializeConversation(convertToLlm(pending)) : "None"}\n\nCompaction focus:\n${focus}\n\nBest-effort rebuilt-context target: ${policy.rebuiltContextTokens} tokens, including ${overhead} estimated tokens of fixed system/tools and pending messages. Aim for the concise continuation requested above, but exceed the target when essential state requires it. Preserve essential agreements; do not fabricate a smaller contract by silently dropping them.`,
 			timestamp: Date.now(),
 		}],
 	}, {
@@ -233,13 +238,11 @@ async function extractCheckpoint(
 	if (goal) draft.anchor.objective = goal.objective;
 	if (ctx.sessionManager.getLeafId() !== leaf) throw new Error("Session changed during extraction; checkpoint was not saved.");
 	const summary = renderContinuation(draft);
-	const remaining = available - summaryTokens(summary);
-	if (remaining < 0) throw new Error("Essential checkpoint cannot fit the rebuilt-context budget; increase rebuiltContextTokens.");
+	const remaining = Math.max(0, available - summaryTokens(summary));
 	const boundary = retainedBoundary(manager, new Set(ctx.sessionManager.getBranch().map((entry) => entry.id)), Math.min(4096, remaining), minimum);
 	manager.appendCompaction(summary, boundary, 0);
 	const rebuilt = manager.buildSessionContext().messages;
 	const estimatedTokensAfter = systemTokens(rebuilt) + conversationTokens(rebuilt) + conversationTokens(pending);
-	if (estimatedTokensAfter > policy.rebuiltContextTokens) throw new Error("Rebuilt context exceeds its estimated budget; checkpoint was not saved.");
 	return {
 		type: "compaction", summary, firstKeptEntryId: boundary, usage: response.usage,
 		details: { kind: "continuation-compaction", version: 1, continuation: draft, estimatedTokensAfter },
@@ -291,7 +294,7 @@ export default function checkpointCompactionExtension(pi: ExtensionAPI) {
 			extraction = new AbortController();
 			const signal = AbortSignal.any([event.signal, extraction.signal]);
 			const checkpoint = await extractCheckpoint(ctx, previewManager(ctx), policy, signal, [], event.customInstructions, event.preparation.firstKeptEntryId);
-			if (checkpoint.firstKeptEntryId === null) throw new Error("No tool-safe recent suffix fits this manual/recovery compaction budget; increase rebuiltContextTokens.");
+			if (checkpoint.firstKeptEntryId === null) throw new Error("No tool-safe persisted suffix is available for manual/recovery compaction.");
 			return { compaction: {
 				summary: checkpoint.summary, firstKeptEntryId: checkpoint.firstKeptEntryId,
 				tokensBefore: event.preparation.tokensBefore, details: checkpoint.details, usage: checkpoint.usage,

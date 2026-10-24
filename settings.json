@@ -38,11 +38,7 @@
   "doubleEscapeAction": "none",
   "treeFilterMode": "default",
   "compaction": {
-    "enabled": true
-  },
-  "checkpointCompaction": {
-    "triggerTokens": 100000,
-    "rebuiltContextTokens": 16000
+    "enabled": false
   },
   "tuiMode": "fullscreen",
   "fullscreenScrollbar": "auto",

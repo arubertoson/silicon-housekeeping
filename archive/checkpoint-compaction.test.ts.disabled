@@ -121,7 +121,7 @@ function setup() {
 		const response = await hook({ type: "session_before_compact", branchEntries, preparation, signal, reason, willRetry: reason === "overflow", customInstructions: "Preserve the no-dependencies agreement." }, ctx) || {};
 		return { response, preparation, before };
 	};
-	const invokeBoundary = async (pending: TurnEndEvent["context"]["pendingMessages"] = [], signal?: AbortSignal) => {
+	const invokeBoundary = async (pending: TurnEndEvent["context"]["pendingMessages"] = [], signal?: AbortSignal, entries: TurnEndEvent["entries"] = []) => {
 		ctx.signal = signal;
 		const branch = session.getBranch();
 		const lastAssistant = branch.findLast((entry) => entry.type === "message" && entry.message.role === "assistant")!;
@@ -129,7 +129,7 @@ function setup() {
 		const projection = session.buildSessionProjection();
 		return await boundaryHook({
 			type: "turn_end", turnIndex: 1, outcome: "completed", message: lastAssistant.message,
-			messageEntryId: lastAssistant.id, toolResults: [], toolResultEntryIds: [], entries: [], continue: false,
+			messageEntryId: lastAssistant.id, toolResults: [], toolResultEntryIds: [], entries, continue: false,
 			context: { contextEntries: projection.entries, contextMessages: projection.messages,
 				llmMessages: convertToLlm(projection.messages), pendingMessages: pending, canContinue: true },
 		}, ctx) || {};
@@ -250,7 +250,7 @@ describe("checkpoint-informed in-place compaction", () => {
 		expect(projected(s.session)).not.toMatch(/first reply|then wait|one increment/i);
 	});
 
-	it.each(["normal", "Pi auto off", "large tool batch", "overflow recovery", "completed reply", "goal metadata", "proposed message"])("applies checkpoint compaction through the real agent scheduler: %s", async (scenario) => {
+	it.each(["normal", "Pi auto off", "large tool batch", "overflow recovery", "completed reply", "goal metadata", "proposed message", "system above target"])("applies checkpoint compaction through the real agent scheduler: %s", async (scenario) => {
 		const s = setup();
 		const runtime = await ModelRuntime.create({
 			authPath: join(s.root, "auth.json"), modelsPath: null,
@@ -313,7 +313,7 @@ describe("checkpoint-informed in-place compaction", () => {
 		const loader = new DefaultResourceLoader({
 			cwd: s.root, agentDir: s.root, settingsManager, extensionFactories: [precedingExtension, checkpointCompactionExtension],
 			noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
-			systemPrompt: "Offline compaction integration test.",
+			systemPrompt: "Offline compaction integration test." + (scenario === "system above target" ? " Mandatory guidelines.".repeat(650) : ""),
 		});
 		await loader.reload();
 		const { session } = await createAgentSession({
@@ -335,7 +335,9 @@ describe("checkpoint-informed in-place compaction", () => {
 			expect(checkpoints).toHaveLength(1);
 			expect(checkpoints[0]).toMatchObject({ details: { estimatedTokensAfter: expect.any(Number) } });
 			if (checkpoints[0].type === "compaction") {
-				expect((checkpoints[0].details as { estimatedTokensAfter: number }).estimatedTokensAfter).toBeLessThanOrEqual(3000);
+				const estimated = (checkpoints[0].details as { estimatedTokensAfter: number }).estimatedTokensAfter;
+				if (scenario === "system above target") expect(estimated).toBeGreaterThan(3000);
+				else expect(estimated).toBeLessThanOrEqual(3000);
 			}
 			if (scenario === "large tool batch") expect(projected(s.session)).not.toContain("Large observation");
 			if (scenario === "goal metadata") {
@@ -387,7 +389,7 @@ describe("checkpoint-informed in-place compaction", () => {
 		expect((await s.invoke(undefined, "overflow")).response.compaction).toBeDefined();
 	});
 
-	it("budgets current prompt/tool declarations and pending messages before extraction", async () => {
+	it("accounts for prompt/tool declarations and pending messages without capping extraction to the rebuild target", async () => {
 		const s = setup();
 		s.setPolicy({ triggerTokens: 5000, rebuiltContextTokens: 2500 });
 		s.setTokens(7000);
@@ -396,7 +398,8 @@ describe("checkpoint-informed in-place compaction", () => {
 		const pending = [{ role: "user" as const, content: "Queued steering. ".repeat(20), timestamp: 3 }];
 		const response = await s.invokeBoundary(pending);
 		expect(s.notify).not.toHaveBeenCalled();
-		expect(s.input()[2].maxTokens).toBeLessThan(1000);
+		expect(s.input()[2].maxTokens).toBe(16_384); // The model's output limit, not the rebuild target.
+		expect(s.input()[1].messages[0].content).toContain("Best-effort rebuilt-context target: 2500 tokens");
 		s.persistBoundary(response);
 		const checkpoint = s.session.getLeafEntry();
 		expect(checkpoint).toMatchObject({ type: "compaction", systemMessage: { toolsAdded: [expect.objectContaining({ name: "wide-schema" })] } });
@@ -441,21 +444,52 @@ describe("checkpoint-informed in-place compaction", () => {
 		expect(projected(s.session)).toContain(continuation().currentState);
 	});
 
-	it.each(["system overhead", "pending overhead", "checkpoint too large"])("reports an infeasible budget without changing context: %s", async (failure) => {
+	it.each(["system overhead", "pending overhead", "checkpoint too large"])("compacts best-effort when the target is exceeded by %s", async (scenario) => {
 		const s = setup();
 		s.setTokens(100_001);
-		if (failure === "system overhead") s.session.appendMessage({ role: "system", content: "Mandatory instruction ".repeat(4000), timestamp: 3 });
-		const pending = failure === "pending overhead" ? [{ role: "user" as const, content: "Queued message ".repeat(5000), timestamp: 4 }] : [];
-		if (failure === "checkpoint too large") {
-			const state = continuation();
+		if (scenario === "system overhead") s.session.appendMessage({ role: "system", content: "Mandatory instruction ".repeat(4000), timestamp: 3 });
+		const pending = scenario === "pending overhead" ? [{ role: "user" as const, content: "Queued message ".repeat(5000), timestamp: 4 }] : [];
+		const state = continuation();
+		if (scenario === "checkpoint too large") {
 			state.anchor.constraints.push("An essential prohibition ".repeat(3000));
 			s.setDraft(state);
 		}
 		const before = s.session.getBranch();
-		expect(await s.invokeBoundary(pending)).toEqual({});
+		const response = await s.invokeBoundary(pending);
 		expect(s.session.getBranch()).toEqual(before);
-		expect(s.notify).toHaveBeenCalledWith(expect.stringMatching(/budget/i), "error");
-		if (failure !== "checkpoint too large") expect(s.streamSimple).not.toHaveBeenCalled();
+		expect(s.notify).not.toHaveBeenCalled();
+		expect(s.streamSimple).toHaveBeenCalledOnce();
+		s.persistBoundary(response);
+		const reopened = SessionManager.open(s.session.getSessionFile()!);
+		expect(reopened.getLeafEntry()).toMatchObject({ type: "compaction", details: { continuation: state,
+			estimatedTokensAfter: expect.any(Number) } });
+		const checkpoint = reopened.getLeafEntry();
+		if (checkpoint?.type === "compaction") expect((checkpoint.details as { estimatedTokensAfter: number }).estimatedTokensAfter).toBeGreaterThan(16_000);
+		expect(projected(reopened)).not.toContain("old transcript");
+		if (scenario === "system overhead") expect(reopened.buildSessionContext().messages).toContainEqual(expect.objectContaining({ role: "system", content: "Mandatory instruction ".repeat(4000) }));
+	});
+
+	it.each(["manual", "overflow"] as const)("retains a tool-safe suffix above a tiny target during %s compaction", async (reason) => {
+		const s = setup();
+		s.setPolicy({ triggerTokens: 100_000, rebuiltContextTokens: 1 });
+		const { response } = await s.invoke(undefined, reason);
+		expect(response.compaction).toBeDefined();
+		s.persist(response);
+		expect(projected(s.session)).toContain("Awaiting approval of the streaming-parser fix.");
+		expect(s.notify).not.toHaveBeenCalled();
+	});
+
+	it("keeps proposed model-visible messages even when they exceed the target", async () => {
+		const s = setup();
+		s.setTokens(100_001);
+		s.setPolicy({ triggerTokens: 100_000, rebuiltContextTokens: 1 });
+		const content = "Mandatory proposed instruction.";
+		const response = await s.invokeBoundary([], undefined, [{ type: "custom_message", customType: "instruction", content, display: false }]);
+		expect(response.entries?.[0]).toMatchObject({ type: "custom_message", content });
+		s.session.appendCustomMessageEntry("instruction", content, false);
+		s.persistBoundary(response);
+		expect(projected(s.session)).toContain(content);
+		expect(s.notify).not.toHaveBeenCalled();
 	});
 
 	it.each([undefined, { triggerTokens: 1000, rebuiltContextTokens: 2000 }, { triggerTokens: 5000, rebuiltContextTokens: 0 }, { triggerTokens: 5000.5, rebuiltContextTokens: 2000 }])("requires explicit, valid policy settings: %j", async (policy) => {
