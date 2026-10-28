@@ -1,6 +1,6 @@
 ---
 name: typescript
-description: Use when writing, reviewing, debugging, or migrating TypeScript code. Follow TypeScript style guidance and verify compatibility with the project's compiler, runtime, module system, and host APIs.
+description: Use when writing, reviewing, debugging, or migrating TypeScript code. Follow a condensed adaptation of Google's TypeScript style guide and verify compatibility with the project's compiler, runtime, module system, and host APIs.
 ---
 
 # TypeScript Development
@@ -8,18 +8,25 @@ description: Use when writing, reviewing, debugging, or migrating TypeScript cod
 Prefer readable TypeScript with precise data models, explicit ownership, and
 visible failure policy. Do not assume type checking establishes runtime support.
 
-## Writing and reviewing code
+## Workflow
 
-Read `references/style-guide.md` completely before writing or reviewing
-TypeScript code. Existing project conventions take precedence over this guide.
-Formatting belongs to the project's formatter configuration, not this skill. Use
-the application-design and testing-styleguide skills for their broader principles
-where relevant.
+1. Identify the compiler version, configuration, runtime or host, module system,
+   and tooling from repository instructions and existing code. If the target is
+   unclear, ask before introducing version-specific syntax or APIs.
+2. Read `references/style-guide.md` completely before writing or reviewing
+   TypeScript. It separates Google-derived rules and examples from explicit
+   local exceptions and engineering guidance. Preserve the distinction between
+   requirements, preferences, and permitted alternatives.
+3. Apply the relevant rules to the task, not as a whole-project migration.
+   Repository conventions, formatter configuration, and required framework or
+   host contracts take precedence. Preserve observable behavior and identify any
+   intentionally changed contracts.
+4. Verify unfamiliar APIs and run the relevant existing checks as described
+   below. Review runtime behavior and ownership, not just type correctness.
 
-Identify the compiler version, TypeScript configuration, runtime or host, module
-system, and tooling from repository instructions, configuration, and existing
-code. If the target is unclear, ask before introducing version-specific syntax
-or APIs.
+Use the application-design and testing-styleguide skills for their broader
+principles where relevant. Consult the linked upstream guide for unresolved
+details, rather than loading it for every routine change.
 
 ## Checking runtime and library APIs
 
