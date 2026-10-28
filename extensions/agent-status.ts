@@ -19,7 +19,7 @@ function line(value: string): string {
 }
 
 function sessionLabel(ctx: ExtensionContext): string {
-	return ctx.sessionManager.getSessionName() || "Pi";
+	return line(ctx.sessionManager.getSessionName() || "").trim() || `Pi (${PID})`;
 }
 
 export default function agentStatusExtension(pi: ExtensionAPI) {
@@ -29,7 +29,7 @@ export default function agentStatusExtension(pi: ExtensionAPI) {
 	let changedAt = Math.floor(Date.now() / 1000);
 	// Keep completion identities distinct when this runtime changes sessions.
 	let completions = 0;
-	let label = "Pi session";
+	let label = `Pi (${PID})`;
 	let project = "";
 	let previousStatus: AgentStatus = "idle";
 	let statusFile: string | undefined;
@@ -73,6 +73,11 @@ export default function agentStatusExtension(pi: ExtensionAPI) {
 		label = sessionLabel(ctx);
 		status = "idle";
 		changedAt = Math.floor(Date.now() / 1000);
+		await publish(status);
+	});
+
+	pi.on("session_info_changed", async (_event, ctx) => {
+		label = sessionLabel(ctx);
 		await publish(status);
 	});
 
