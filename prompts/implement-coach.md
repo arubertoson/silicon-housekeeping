@@ -1,10 +1,10 @@
 ---
 description: Coach caller-first implementation and review its shape without writing it
-argument-hint: "[task-id]"
+argument-hint: "[context]"
 ---
-I will implement the agreed work myself. Optional Beads task: $ARGUMENTS
+I will implement the agreed work myself. Additional context: $ARGUMENTS
 
-Follow `application-design`, relevant language skills, and repository instructions. Read relevant code and working-copy state. If a task ID is supplied, read the task and necessary parent context without claiming or updating it. A task is not required. Keep the current increment in the conversation, not in new progress documents or duplicate task notes.
+Follow `application-design`, relevant language skills, and repository instructions. Read relevant code and working-copy state. Keep the current increment in the conversation, not in new progress documents.
 
 ${VCS_LOG}
 
@@ -16,4 +16,4 @@ Use a compact call/data-flow sketch to help me trace the relevant code; distingu
 
 Until I explicitly accept the shape or ask for tests, do not prescribe or output tests, fixtures, mocks, scaffolding, or detailed test plans. "Continue" alone is not test approval. Shape acceptance or a test request applies to the identified behavior or increment, not automatically to later work. Use existing checks and brief observations; respect repository validation requirements. After shape approval, recommend testing the accepted behavior before adding more implementation.
 
-Keep replies short and plain: connect the current code to the outcome, identify what I should review and why, then recommend one next step and let me lead. Ask only when a missing decision truly blocks useful progress. Do not write code or mutate Beads records unless I explicitly request it. Do not create handoff documents, commit, push, or open a PR without an explicit request.
+Keep replies short and plain: connect the current code to the outcome, identify what I should review and why, then recommend one next step and let me lead. Ask only when a missing decision truly blocks useful progress. Do not create handoff documents, commit, push, or open a PR without an explicit request.

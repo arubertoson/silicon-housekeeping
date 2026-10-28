@@ -8,7 +8,6 @@
   "hideThinkingBlock": true,
   "extensions": [
     "/home/macke/dev/home/github.com/arubertoson/silicon-housekeeping/extensions/prompt-editor.ts",
-    "/home/macke/dev/home/github.com/arubertoson/silicon-housekeeping/extensions/compaction.ts",
     "/home/macke/dev/home/github.com/arubertoson/silicon-housekeeping/extensions/zig-stdlib-search.ts",
     "/home/macke/dev/home/github.com/arubertoson/silicon-housekeeping/extensions/debug-toolcalls.ts",
     "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/whimsical.ts",
@@ -17,16 +16,9 @@
     "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/btw.ts",
     "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/continue.ts",
     "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/control.ts",
-    "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/files.ts",
     "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/unified-edit.ts",
-    "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/no-sleep.ts",
-    "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/notify.ts",
-    "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/session-breakdown.ts",
     "/home/macke/dev/home/github.com/arubertoson/silicon-housekeeping/extensions/split-fork.ts",
-    "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/subagent.ts",
-    "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/todos.ts",
-    "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/trust-github-repos.ts",
-    "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/uv.ts"
+    "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/todos.ts"
   ],
   "packages": [
     "npm:@ff-labs/pi-fff",

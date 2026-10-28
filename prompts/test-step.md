@@ -12,4 +12,4 @@ Test through the nearest meaningful caller boundary with real deterministic comp
 
 Default to implementation (step) mode unless the current conversation explicitly establishes coaching mode or I request coaching. In implementation mode, state the selected cases briefly and write and run them without another permission round. Fix local correctness defects they expose within the agreed behavior; if a fix requires changing the agreed caller contract or responsibilities, report it rather than redesigning silently. In coaching mode, recommend the cases and where to exercise them, then review my work; do not write code unless I ask.
 
-Report what is now verified, which checks actually ran, and any meaningful gap. Point to the tests worth reviewing and recommend the next step. Do not expand feature scope, mutate Beads records, create progress documents, commit, push, or open a PR.
+Report what is now verified, which checks actually ran, and any meaningful gap. Point to the tests worth reviewing and recommend the next step. Do not expand feature scope, create progress documents, commit, push, or open a PR.
