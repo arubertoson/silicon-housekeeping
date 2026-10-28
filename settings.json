@@ -1,5 +1,5 @@
 {
-  "lastChangelogVersion": "1.0.4",
+  "lastChangelogVersion": "1.4.0",
   "defaultProvider": "openai-codex",
   "defaultTools": [
     "+codemode",
@@ -11,32 +11,33 @@
     "/home/macke/dev/home/github.com/arubertoson/silicon-housekeeping/extensions/zig-stdlib-search.ts",
     "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/whimsical.ts",
     "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/answer.ts",
-    "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/goal.ts",
-    "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/btw.ts",
-    "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/continue.ts",
-    "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/control.ts",
     "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/unified-edit.ts",
     "/home/macke/dev/home/github.com/arubertoson/silicon-housekeeping/extensions/split-fork.ts",
     "/home/macke/dev/home/github.com/mitsuhiko/agent-stuff/extensions/todos.ts"
   ],
   "packages": [
+    "/home/macke/dev/home/github.com/arubertoson/parley.nvim",
     "npm:@ff-labs/pi-fff",
     "git:github.com/Mathuv/pi-symbol-autocomplete@2b91b1991fecfc8dc2e2667dd74fb9a0101c2423",
-    "npm:pi-slopchop"
+    "/home/macke/.config/agents/pi-cached-compaction"
   ],
   "editorPaddingX": 3,
   "enableInstallTelemetry": false,
   "doubleEscapeAction": "none",
   "treeFilterMode": "default",
   "compaction": {
-    "enabled": false,
-    "keepRecentTokens": 24000
-  },
-  "cacheAwareCompaction": {
     "enabled": true,
-    "targetTokens": 156000,
-    "idleMinFraction": 0.7,
-    "expiryLeadSeconds": 30
+    "keepRecentTokens": 24000,
+    "modelOverrides": {
+      "openai-codex/gpt-6.1-sol": {
+        "reserveTokens": 344000
+      }
+    }
+  },
+  "cachedCompaction": {
+    "cacheRetention": "short",
+    "compactBeforeExpiry": true,
+    "minContextTokens": 109200
   },
   "tuiMode": "fullscreen",
   "fullscreenScrollbar": "auto",
@@ -48,5 +49,8 @@
   "collapseChangelog": true,
   "fullscreenExitOutput": "resume-hint",
   "defaultThinkingLevel": "high",
-  "theme": "dark"
+  "theme": "dark",
+  "markdown": {
+    "mermaid": "streaming"
+  }
 }

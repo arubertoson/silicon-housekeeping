@@ -1,3 +1,5 @@
 {
-  "careful": "Check edge ${1} cases and avoid ${2:test} unrelated changes."
+  "careful": "Check edge ${1} cases and avoid ${2:test} unrelated changes.",
+  "asd": "Explain using the ASD-STE100 standard.",
+  "investigate": "Investigate and report back with concrete findings."
 }
