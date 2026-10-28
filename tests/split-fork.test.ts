@@ -6,7 +6,7 @@ import {
 	type ExtensionUIContext,
 } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import splitForkExtension from "../extensions/split-fork.ts";
+import splitExtension from "../extensions/split.ts";
 
 const cleanup: (() => void)[] = [];
 afterEach(() => {
@@ -70,7 +70,7 @@ if (args[0] === "pane-can-add") {
 	const loader = new DefaultResourceLoader({
 		cwd, agentDir: root, settingsManager,
 		noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true,
-		extensionFactories: [splitForkExtension],
+		extensionFactories: [splitExtension],
 	});
 	await loader.reload();
 	const { session } = await createAgentSession({
@@ -98,7 +98,7 @@ if (args[0] === "pane-can-add") {
 	};
 }
 
-describe("tmux split-fork through Pi's real extension runtime", () => {
+describe("tmux split fork mode through Pi's real extension runtime", () => {
 	it("Alt+Shift+O snapshots only the selected branch without changing the parent", async () => {
 		const h = await harness();
 		const file = h.manager.getSessionFile()!;
@@ -127,7 +127,7 @@ describe("tmux split-fork through Pi's real extension runtime", () => {
 	it("the slash command passes an optional prompt as one literal argument", async () => {
 		const h = await harness();
 		const prompt = "-inspect 'quoted paths'; do not run shell commands";
-		await h.session.prompt(`/split-fork ${prompt}`);
+		await h.session.prompt(`/split fork ${prompt}`);
 		const launch = h.calls()[1];
 		expect(launch.slice(-2)).toEqual(["--", prompt]);
 		expect(h.files()).toHaveLength(2);
