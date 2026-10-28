@@ -3,7 +3,7 @@
 // this copy adapts the model selector to the host Pi runtime API.
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { CustomEditor } from "@earendil-works/pi-coding-agent";
-import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { isKeyRelease, isKeyRepeat, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs/promises";
@@ -944,7 +944,9 @@ interface PromptEntry {
 	timestamp: number;
 }
 
-class PromptEditor extends CustomEditor {
+export class PromptEditor extends CustomEditor {
+	public onDoubleEscape?: () => void;
+	private lastEscapeTime: number | undefined;
 	public modeLabelProvider?: () => string;
 	/**
 	 * Color function for the mode label. If unset, the label inherits the border color.
@@ -970,6 +972,23 @@ class PromptEditor extends CustomEditor {
 			configurable: true,
 			enumerable: true,
 		});
+	}
+
+	handleInput(data: string): void {
+		if (isKeyRelease(data) || (matchesKey(data, "escape") && isKeyRepeat(data))) return;
+		if (matchesKey(data, "escape") && !this.getText() && !this.isShowingAutocomplete()) {
+			const now = Date.now();
+			if (this.onDoubleEscape && this.lastEscapeTime !== undefined && now - this.lastEscapeTime < 500) {
+				this.lastEscapeTime = undefined;
+				this.onDoubleEscape();
+				return;
+			}
+			this.lastEscapeTime = now;
+		} else {
+			this.lastEscapeTime = undefined;
+		}
+		// The first Escape still reaches Pi's normal abort/cancel handler.
+		super.handleInput(data);
 	}
 
 	lockBorderColor() {
@@ -1187,6 +1206,7 @@ function setEditor(pi: ExtensionAPI, ctx: ExtensionContext, history: PromptEntry
 	const uiTheme = ctx.ui.theme;
 	ctx.ui.setEditorComponent((tui, theme, keybindings) => {
 		const editor = new PromptEditor(tui, theme, keybindings);
+		editor.onDoubleEscape = () => pi.sendUserMessage("/undo", { expandPromptTemplates: true });
 		requestEditorRender = () => editor.requestRenderNow();
 		editor.modeLabelProvider = () => runtime.currentMode;
 		// Keep the mode label color stable (match footer/status bar).
