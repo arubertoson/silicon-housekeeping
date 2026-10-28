@@ -1,9 +1,10 @@
 import { existsSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { BorderedLoader, type AgentSession, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { createCommitSession, disposeCommitSession } from "../support/commit-session.ts";
 
 const VCS_INSTRUCTIONS = {
-	git: "Review `git status` and the relevant diff (including staged changes). Stage explicit task-related paths and commit. Never use `git add .` or `git add -A`. Do not include unrelated staged changes.",
+	git: "Review `git status` and the relevant diff (including staged changes). Stage explicit task-related paths and commit those paths only (for example, `git commit --only -- <paths>`). Never use `git add .` or `git add -A`. Do not include, reset, or unstage unrelated staged changes. Stop if task-related and unrelated edits in a selected path cannot be isolated safely.",
 	jj: "Review `jj status` and `jj diff`. Describe the task-related change with `jj describe`, then run `jj new` to start a fresh working-copy change. Do not use `jj commit`. If the working-copy change includes unrelated work, isolate the requested work safely before describing it; stop if that is not possible.",
 } as const;
 
@@ -25,6 +26,9 @@ async function detectVcs(pi: ExtensionAPI, cwd: string): Promise<"git" | "jj"> {
 			);
 			if (result.killed || result.code !== 0 || !result.stdout.trim()) {
 				throw new Error(result.stderr.trim() || `Cannot validate the ${vcs} repository; commit not started.`);
+			}
+			if (vcs === "git" && realpathSync(result.stdout.replace(/\r?\n$/, "")) !== directory) {
+				throw new Error("Git resolved a different repository boundary; commit not started.");
 			}
 			return vcs;
 		}
@@ -59,57 +63,94 @@ Use an allowed Conventional Commit type (feat, fix, refactor, docs, test, chore,
 }
 
 export default function commitExtension(pi: ExtensionAPI) {
-	let starting = false;
-	let restore:
-		| {
-				previousModel: NonNullable<ExtensionContext["model"]>;
-				previousThinking: ReturnType<typeof pi.getThinkingLevel>;
-		  }
-		| undefined;
-
-	function restoreThinking(ctx: ExtensionContext) {
-		const saved = restore;
-		restore = undefined;
-		// Do not overwrite a model or thinking level deliberately changed during the run.
-		if (
-			!saved ||
-			ctx.model?.provider !== saved.previousModel.provider ||
-			ctx.model.id !== saved.previousModel.id ||
-			pi.getThinkingLevel() !== "off"
-		)
-			return;
-		pi.setThinkingLevel(saved.previousThinking);
-		ctx.ui.notify("Restored the previous thinking level after /commit.", "info");
-	}
-
-	pi.on("agent_settled", (_event, ctx) => restoreThinking(ctx));
-	pi.on("session_shutdown", (_event, ctx) => restoreThinking(ctx));
+	let running: AbortController | undefined;
+	let scratch: AgentSession | undefined;
+	let task: Promise<void> | undefined;
+	const cancel = () => {
+		running?.abort();
+		void scratch?.abort();
+	};
+	const busy = () => running !== undefined;
+	pi.on("input", (_event, ctx) => {
+		if (!busy()) return;
+		ctx.ui.notify("/commit is running; cancel it before starting other work.", "warning");
+		return { action: "handled" };
+	});
+	pi.on("tool_call", () => busy() ? { block: true, reason: "/commit owns this working copy." } : undefined);
+	pi.on("user_bash", () => busy() ? {
+		result: { output: "/commit owns this working copy.", exitCode: 1, cancelled: false, truncated: false },
+	} : undefined);
+	// Internal extension/API prompts can bypass input. Stop both runs before parent tools
+	// can execute, rather than allowing two agents to mutate the same working copy.
+	pi.on("agent_start", (_event, ctx) => {
+		if (!busy()) return;
+		cancel();
+		ctx.abort();
+	});
+	pi.on("session_before_switch", () => busy() ? { cancel: true } : undefined);
+	pi.on("session_before_fork", () => busy() ? { cancel: true } : undefined);
+	pi.on("session_before_tree", () => busy() ? { cancel: true } : undefined);
+	pi.on("session_before_compact", () => busy() ? { cancel: true } : undefined);
+	pi.on("session_shutdown", async () => { cancel(); await task; });
 
 	pi.registerCommand("commit", {
-		description: "Create a local Git or jj change: /commit [issue] [files/instructions]",
+		description: "Create a local Git/jj change in a disposable session; /commit cancel to stop",
 		handler: async (args, ctx) => {
-			if (starting || restore || !ctx.isIdle() || ctx.hasPendingMessages()) {
+			if (args.trim() === "cancel") { cancel(); return; }
+			// Only the focused terminal modal provides exclusive user-command ownership.
+			// RPC/print have no command lock and could start another filesystem command.
+			if (ctx.mode !== "tui") {
+				ctx.ui.notify("/commit requires interactive TUI mode for cancellable, exclusive working-copy access.", "error");
+				return;
+			}
+			if (busy() || !ctx.isIdle() || ctx.hasPendingMessages()) {
 				ctx.ui.notify("Wait for current work to settle before /commit.", "warning");
 				return;
 			}
-			starting = true;
+			const controller = new AbortController();
+			running = controller;
+			const work = async () => {
+				try {
+					const vcs = await detectVcs(pi, ctx.cwd);
+					controller.signal.throwIfAborted();
+					scratch = await createCommitSession(pi, ctx, { signal: controller.signal });
+					controller.signal.throwIfAborted();
+					if (!ctx.isIdle() || ctx.hasPendingMessages()) throw new Error("Parent work started; commit stopped.");
+					ctx.ui.setStatus("commit", `${vcs}: ${scratch.model?.id}, thinking ${scratch.thinkingLevel} (cancel: /commit cancel)`);
+					scratch.subscribe((event) => {
+						if (event.type === "tool_execution_start") ctx.ui.setStatus("commit", `${vcs}: ${event.toolName}`);
+					});
+					await scratch.prompt(commitPrompt(vcs, args), { expandPromptTemplates: false });
+					controller.signal.throwIfAborted();
+					const last = scratch.messages.findLast((message) => message.role === "assistant");
+					if (last?.role !== "assistant" || last.stopReason !== "stop") {
+						throw new Error(last?.role === "assistant" ? last.errorMessage ?? `Agent stopped: ${last.stopReason}` : "No commit result.");
+					}
+					ctx.ui.notify(scratch.getLastAssistantText() || "Commit session finished without a report; inspect VCS status.", "info");
+				} catch (error) {
+					ctx.ui.notify(controller.signal.aborted
+						? "/commit cancelled. Inspect VCS status: completed filesystem changes are not rolled back."
+						: `/commit failed: ${error instanceof Error ? error.message : String(error)}`,
+						controller.signal.aborted ? "warning" : "error");
+				} finally {
+					try { if (scratch) await disposeCommitSession(scratch); }
+					finally { scratch = undefined; ctx.ui.setStatus("commit", undefined); }
+				}
+			};
+			task = undefined;
 			try {
-				const vcs = await detectVcs(pi, ctx.cwd);
-				const previousModel = ctx.model;
-				if (!previousModel) throw new Error("Select a model before /commit.");
-				const previousThinking = pi.getThinkingLevel();
-				// Repository validation can yield; never queue a commit behind newly started work.
-				if (!ctx.isIdle() || ctx.hasPendingMessages()) throw new Error("Wait for current work before /commit.");
-				pi.setThinkingLevel("off");
-				restore = { previousModel, previousThinking };
-				if (!ctx.isIdle() || ctx.hasPendingMessages()) throw new Error("Wait for current work before /commit.");
-				ctx.ui.notify(`Commit VCS: ${vcs}; model: ${previousModel.provider}/${previousModel.id}, thinking off.`, "info");
-				pi.sendUserMessage(commitPrompt(vcs, args));
-			} catch (error) {
-				restoreThinking(ctx);
-				ctx.ui.notify(`Cannot start /commit: ${error instanceof Error ? error.message : String(error)}`, "error");
+				await ctx.ui.custom<void>((tui, theme, _keys, done) => {
+					const loader = new BorderedLoader(tui, theme, "Committing in an isolated session (Esc to cancel)");
+					loader.onAbort = cancel;
+					// Keep the UI/working-copy lease until cancellation and disposal finish.
+					task = work();
+					task.then(() => done(), () => done());
+					return loader;
+				});
 			} finally {
-				starting = false;
+				cancel();
+				try { await task; }
+				finally { running = undefined; task = undefined; }
 			}
 		},
 	});
