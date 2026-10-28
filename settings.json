@@ -23,7 +23,6 @@
   "packages": [
     "npm:@ff-labs/pi-fff",
     "git:github.com/Mathuv/pi-symbol-autocomplete@2b91b1991fecfc8dc2e2667dd74fb9a0101c2423",
-    "npm:@se1zer/pi-copy@1.0.0",
     "npm:pi-slopchop"
   ],
   "editorPaddingX": 3,

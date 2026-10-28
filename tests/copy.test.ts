@@ -1,7 +1,7 @@
 import { copyToClipboard, SessionManager, type ExtensionAPI, type ExtensionCommandContext, type ExtensionUIContext, type RegisteredCommand, type SessionMessageEntry, type Theme } from "@earendil-works/pi-coding-agent";
-import { CURSOR_MARKER, getKeybindings, visibleWidth, type Component, type Focusable } from "@earendil-works/pi-tui";
+import { getKeybindings, visibleWidth, type Component, type Focusable } from "@earendil-works/pi-tui";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import copyRangeExtension from "../extensions/copy-range.ts";
+import copyExtension from "../extensions/copy.ts";
 
 // The OS clipboard is the only external side effect; exercise real session storage and picker input.
 vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => ({
@@ -31,7 +31,8 @@ type Script = string[] | ((picker: Picker) => void);
 function command(session: SessionManager, scripts: Script[] = [], mode: ExtensionCommandContext["mode"] = "tui") {
 	let handler: RegisteredCommand["handler"];
 	const registerCommand = vi.fn((_name: string, definition: Omit<RegisteredCommand, "name" | "sourceInfo">) => { handler = definition.handler; });
-	copyRangeExtension({ registerCommand } as unknown as ExtensionAPI);
+	const on = vi.fn();
+	copyExtension({ registerCommand, on } as unknown as ExtensionAPI);
 	const notify = vi.fn();
 	let dialog = 0;
 	const custom = vi.fn(async (factory: Parameters<ExtensionUIContext["custom"]>[0]) => {
@@ -39,12 +40,12 @@ function command(session: SessionManager, scripts: Script[] = [], mode: Extensio
 		let result: unknown;
 		const picker = await factory(
 			{ requestRender: () => {} } as Parameters<typeof factory>[0],
-			{ fg: (_color: string, text: string) => text } as Theme,
+			{ fg: (_color: string, text: string) => text, bg: (_color: string, text: string) => text } as Theme,
 			getKeybindings() as Parameters<typeof factory>[2],
 			(value) => { finished = true; result = value; },
 		) as Picker;
 		picker.focused = true;
-		expect(picker.render(100).join("\n")).toContain(CURSOR_MARKER);
+		picker.render(100);
 		const script = scripts[dialog++];
 		if (typeof script === "function") script(picker);
 		else for (const key of script ?? []) picker.handleInput!(key);
@@ -52,7 +53,7 @@ function command(session: SessionManager, scripts: Script[] = [], mode: Extensio
 		return result;
 	});
 	const ctx = { mode, sessionManager: session, ui: { notify, custom } } as unknown as ExtensionCommandContext;
-	return { invoke: (args = "") => handler(args, ctx), notify, custom, registerCommand };
+	return { invoke: (args = "range") => handler(args, ctx), notify, custom, registerCommand, on };
 }
 
 function copied(): string {
@@ -60,7 +61,7 @@ function copied(): string {
 	return vi.mocked(copyToClipboard).mock.calls[0][0];
 }
 
-describe("/copy-range", () => {
+describe("/copy range", () => {
 	it("copies only the inclusive active-branch range, preserving raw history and tool behavior", async () => {
 		const session = SessionManager.inMemory();
 		user(session, "Outside before");
@@ -254,8 +255,7 @@ describe("/copy-range", () => {
 
 	it.each(["rpc", "json", "print"] as const)("rejects %s mode without opening terminal UI or copying", async (mode) => {
 		const c = command(SessionManager.inMemory(), [], mode);
-		await c.invoke();
-		expect(c.notify).toHaveBeenCalledWith(expect.stringContaining("requires TUI mode"), "error");
+		await expect(c.invoke()).rejects.toThrow("/copy requires TUI mode");
 		expect(c.custom).not.toHaveBeenCalled();
 		expect(copyToClipboard).not.toHaveBeenCalled();
 	});
@@ -263,9 +263,243 @@ describe("/copy-range", () => {
 	it("registers the command and rejects unexpected arguments", async () => {
 		const c = command(SessionManager.inMemory());
 		await c.invoke("all");
-		expect(c.registerCommand).toHaveBeenCalledWith("copy-range", expect.objectContaining({ description: expect.stringContaining("active branch") }));
-		expect(c.notify).toHaveBeenCalledWith(expect.stringContaining("Usage: /copy-range"), "warning");
+		expect(c.registerCommand).toHaveBeenCalledWith("copy", expect.objectContaining({ description: expect.stringContaining("active-branch") }));
+		expect(c.registerCommand).toHaveBeenCalledOnce();
+		expect(c.notify).toHaveBeenCalledWith("Usage: /copy [message|range|block|edit]", "warning");
 		expect(c.custom).not.toHaveBeenCalled();
 		expect(copyToClipboard).not.toHaveBeenCalled();
+	});
+});
+
+describe("/copy", () => {
+	it("copies the last assistant text like Pi, excluding thinking and tool calls", async () => {
+		const session = SessionManager.inMemory();
+		assistant(session, [{ type: "text", text: "Older reply" }]);
+		assistant(session, [
+			{ type: "thinking", thinking: "Private reasoning" },
+			{ type: "text", text: "  Last " },
+			{ type: "toolCall", id: "call", name: "bash", arguments: { command: "echo tool" } },
+			{ type: "text", text: "response  \n" },
+		]);
+		user(session, "Latest user input");
+		const c = command(session);
+		await c.invoke("");
+		expect(copied()).toBe("Last response");
+		expect(c.custom).not.toHaveBeenCalled();
+		expect(c.notify).toHaveBeenCalledWith("Copied last agent message to clipboard", "info");
+	});
+
+	it("skips an empty aborted response, but does not skip a tool-only response", async () => {
+		const session = SessionManager.inMemory();
+		assistant(session, [{ type: "text", text: "Previous response" }]);
+		session.appendMessage({ role: "assistant", content: [], stopReason: "aborted", api: "anthropic-messages", provider: "anthropic", model: "test", timestamp, usage });
+		await command(session).invoke("");
+		expect(copied()).toBe("Previous response");
+		vi.mocked(copyToClipboard).mockClear();
+		assistant(session, [{ type: "toolCall", id: "call", name: "read", arguments: {} }]);
+		const c = command(session);
+		await c.invoke("");
+		expect(copyToClipboard).not.toHaveBeenCalled();
+		expect(c.notify).toHaveBeenCalledWith("No agent messages to copy yet.", "warning");
+	});
+
+	it.each(["message extra", "range extra", "block extra", "last", "BLOCK"])("rejects unsupported arguments %j", async (args) => {
+		const c = command(SessionManager.inMemory());
+		await c.invoke(args);
+		expect(c.notify).toHaveBeenCalledWith("Usage: /copy [message|range|block|edit]", "warning");
+		expect(c.custom).not.toHaveBeenCalled();
+		expect(copyToClipboard).not.toHaveBeenCalled();
+	});
+
+	it.each(["rpc", "json", "print"] as const)("rejects all operations outside the TUI (%s)", async (mode) => {
+		const session = SessionManager.inMemory();
+		assistant(session, [{ type: "text", text: "```\ncode\n```" }]);
+		const c = command(session, [], mode);
+		for (const args of ["", "message", "range", "block"]) {
+			await expect(c.invoke(args)).rejects.toThrow("/copy requires TUI mode");
+		}
+		expect(c.custom).not.toHaveBeenCalled();
+		expect(copyToClipboard).not.toHaveBeenCalled();
+	});
+
+	it.each(["", "message", "block"])("reports a clipboard failure without a success notice (%j)", async (args) => {
+		const session = SessionManager.inMemory();
+		assistant(session, [{ type: "text", text: "```\ncode\n```" }]);
+		vi.mocked(copyToClipboard).mockRejectedValue(new Error("clipboard unavailable"));
+		const c = command(session, args === "message" ? [[enter]] : []);
+		await c.invoke(args);
+		expect(c.notify).toHaveBeenCalledOnce();
+		expect(c.notify).toHaveBeenCalledWith(expect.stringContaining("clipboard unavailable"), "error");
+	});
+});
+
+describe("/copy message", () => {
+	it("searches raw user and assistant text across the active branch without copying metadata", async () => {
+		const session = SessionManager.inMemory();
+		const root = user(session, "First user");
+		const target = assistant(session, [
+			{ type: "thinking", thinking: "Do not copy thinking" },
+			{ type: "text", text: "  Original " }, { type: "text", text: "assistant text  \n" },
+			{ type: "toolCall", id: "call", name: "read", arguments: {} },
+		]);
+		session.appendContextEdit(target, { content: "Rewritten assistant" });
+		session.appendCompaction("Summary", target, 1000);
+		user(session, "Most recent user");
+		const leaf = session.getLeafId();
+		session.branch(root);
+		assistant(session, [{ type: "text", text: "Abandoned assistant" }]);
+		session.branch(leaf!);
+		const before = JSON.stringify(session.getEntries());
+		const c = command(session, [(picker) => {
+			picker.handleInput!("abandoned");
+			expect(picker.render(100).join("\n")).toContain("No matching messages");
+			picker.handleInput!(clear);
+			picker.handleInput!("assistant original text");
+			picker.handleInput!(enter);
+		}]);
+		await c.invoke("message");
+		expect(copied()).toBe("  Original assistant text  \n");
+		expect(JSON.stringify(session.getEntries())).toBe(before);
+		expect(session.getLeafId()).toBe(leaf);
+	});
+
+	it("shows the newest message first and permits selection of older duplicate text by ID", async () => {
+		const session = SessionManager.inMemory();
+		const oldest = user(session, "Duplicate");
+		user(session, "Duplicate");
+		assistant(session, [{ type: "text", text: "Newest" }]);
+		await command(session, [[enter]]).invoke("message");
+		expect(copied()).toBe("Newest");
+		vi.mocked(copyToClipboard).mockClear();
+		await command(session, [[oldest, enter]]).invoke("message");
+		expect(copied()).toBe("Duplicate");
+	});
+
+	it("searches beyond the external package's former message limit", async () => {
+		const session = SessionManager.inMemory();
+		user(session, "Oldest searchable content");
+		for (let index = 0; index < 100; index++) user(session, `Other ${index}`);
+		await command(session, [["oldest searchable", enter]]).invoke("message");
+		expect(copied()).toBe("Oldest searchable content");
+	});
+
+	it("reports a branch without user or assistant text", async () => {
+		const session = SessionManager.inMemory();
+		user(session, "   ");
+		session.appendCustomMessageEntry("custom", "Not user or assistant", true);
+		session.appendMessage({ role: "user", content: [{ type: "image", data: "opaque", mimeType: "image/png" }], timestamp });
+		const c = command(session);
+		await c.invoke("message");
+		expect(c.notify).toHaveBeenCalledWith("No user or assistant text on the active branch to copy", "warning");
+		expect(c.custom).not.toHaveBeenCalled();
+		expect(copyToClipboard).not.toHaveBeenCalled();
+	});
+
+	it("cancels without changing the clipboard", async () => {
+		const session = SessionManager.inMemory();
+		user(session, "Some text");
+		await command(session, [[escape]]).invoke("message");
+		expect(copyToClipboard).not.toHaveBeenCalled();
+	});
+});
+
+describe("/copy block", () => {
+	it("copies one fence directly without treating its quote markers as blockquotes", async () => {
+		const session = SessionManager.inMemory();
+		assistant(session, [{ type: "text", text: "Intro\n\n~~~sh\n> literal\n  indented  \n~~~" }]);
+		const c = command(session);
+		await c.invoke("block");
+		expect(copied()).toBe("> literal\n  indented  ");
+		expect(c.custom).not.toHaveBeenCalled();
+	});
+
+	it("labels multiple blocks with a compact type or language and content preview", async () => {
+		const session = SessionManager.inMemory();
+		assistant(session, [{ type: "text", text: "\n\n```ts\nrun()\n```\n\n> **Check first**\n> Then continue." }]);
+		const c = command(session, [(picker) => {
+			const screen = picker.render(140).join("\n");
+			for (const part of ["ts", "run()", "Quote", "**Check first**"]) expect(screen).toContain(part);
+			expect(screen).not.toContain("line 3");
+			expect(screen).not.toContain("line 7");
+			expect(screen).toContain("Copy block · esc to cancel");
+			expect(screen).not.toContain("Search:");
+			expect(screen).not.toContain("Type to select");
+			picker.handleInput!("\x1b[B");
+			picker.handleInput!(enter);
+		}]);
+		await c.invoke("block");
+		expect(copied()).toBe("**Check first**\nThen continue.");
+	});
+
+	it("shows numbered options with margins and navigates them with picker-local Ctrl+N/P", async () => {
+		const session = SessionManager.inMemory();
+		assistant(session, [{ type: "text", text: "> Alpha quote\n\n```sh\nBeta command\n```\n\n> Gamma quote" }]);
+		const c = command(session, [(picker) => {
+			picker.handleInput!("\x10"); // Ctrl+P wraps to the last option.
+			expect(picker.render(100).join("\n")).toMatch(/^  ▸ 3.*Gamma quote/m);
+			picker.handleInput!("\x0e"); // Ctrl+N wraps back to the first.
+			expect(picker.render(100).join("\n")).toMatch(/^  ▸ 1.*Alpha quote/m);
+			picker.handleInput!("\x0e");
+			const screen = picker.render(100).join("\n");
+			expect(screen).toMatch(/^  ▸ 2.*Beta command/m);
+			const rows = screen.split("\n");
+			expect(rows[0]).toContain("Copy block · esc to cancel");
+			expect(rows[1].trim()).toBe("");
+			expect(rows[2]).toContain("Alpha quote");
+			expect(screen.endsWith("\n")).toBe(true);
+			expect(screen.indexOf("Alpha quote")).toBeLessThan(screen.indexOf("Beta command"));
+			expect(screen.indexOf("Beta command")).toBeLessThan(screen.indexOf("Gamma quote"));
+			picker.handleInput!("\x0e");
+			picker.handleInput!(enter);
+		}]);
+		await c.invoke("block");
+		expect(copied()).toBe("Gamma quote");
+	});
+
+	it("does not search older replies or other branches when the last reply has no blocks", async () => {
+		const session = SessionManager.inMemory();
+		const first = assistant(session, [{ type: "text", text: "```\nolder\n```" }]);
+		assistant(session, [{ type: "text", text: "No blocks here" }]);
+		const leaf = session.getLeafId();
+		session.branch(first);
+		assistant(session, [{ type: "text", text: "> Abandoned" }]);
+		session.branch(leaf!);
+		const c = command(session);
+		await c.invoke("block");
+		expect(c.notify).toHaveBeenCalledWith("No fenced code blocks or blockquotes in the last assistant message", "warning");
+		expect(c.custom).not.toHaveBeenCalled();
+		expect(copyToClipboard).not.toHaveBeenCalled();
+	});
+
+	it("does not use thinking or Bash tool calls as Markdown block sources", async () => {
+		const session = SessionManager.inMemory();
+		assistant(session, [
+			{ type: "text", text: "No block" },
+			{ type: "thinking", thinking: "```\nprivate\n```" },
+			{ type: "toolCall", id: "bash", name: "bash", arguments: { command: "echo tool" } },
+		]);
+		await command(session).invoke("block");
+		expect(copyToClipboard).not.toHaveBeenCalled();
+	});
+
+	it("reports missing assistant text", async () => {
+		const c = command(SessionManager.inMemory());
+		await c.invoke("block");
+		expect(c.notify).toHaveBeenCalledWith("No assistant text to copy blocks from", "warning");
+		expect(copyToClipboard).not.toHaveBeenCalled();
+	});
+
+	it("ignores text input and cancels without copying a block", async () => {
+		const session = SessionManager.inMemory();
+		assistant(session, [{ type: "text", text: "```\ncode\n```\n\n> Quote" }]);
+		const c = command(session, [(picker) => {
+			const before = picker.render(100);
+			picker.handleInput!("not-present");
+			expect(picker.render(100)).toEqual(before);
+			picker.handleInput!(escape);
+		}]);
+		await c.invoke("block");
+		expect(copyToClipboard).not.toHaveBeenCalled();
+		expect(c.notify).not.toHaveBeenCalled();
 	});
 });
